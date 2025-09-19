@@ -16,7 +16,7 @@ export default function Index() {
 
 	if (!ready) return null;
 	if (!loggedIn) return <Redirect href="/auth" />;
-	return <Redirect href="/(tabs)/trips" />;
+	return <Redirect href="/(tabs)/explore" />;
 }
 
 

@@ -1,32 +1,64 @@
 import { executeAsync, getDatabase, queryAsync } from './db';
 
 export type ChecklistItem = {
-	id: number;
-	trip_id: number;
-	title: string;
-	is_done: number; // 0 or 1
+  id: number;
+  trip_id: number;
+  text: string;
+  is_checked: number;
+  created_at: number;
 };
 
-export async function listChecklist(tripId: number): Promise<ChecklistItem[]> {
-	const db = await getDatabase();
-	return await queryAsync<ChecklistItem>(db, 'SELECT id, trip_id, title, is_done FROM checklist_items WHERE trip_id = ? ORDER BY id DESC', [tripId]);
+export async function createChecklistItem(tripId: number, text: string): Promise<ChecklistItem> {
+  const db = await getDatabase();
+  const createdAt = Date.now();
+  
+  await executeAsync(
+    db,
+    'INSERT INTO checklist_items (trip_id, text, is_checked, created_at) VALUES (?, ?, ?, ?)',
+    [tripId, text, 0, createdAt]
+  );
+  
+  const rows = await queryAsync<ChecklistItem>(
+    db,
+    'SELECT * FROM checklist_items WHERE trip_id = ? AND created_at = ?',
+    [tripId, createdAt]
+  );
+  
+  return rows[0];
 }
 
-export async function addChecklistItem(tripId: number, title: string): Promise<number> {
-	const db = await getDatabase();
-	await executeAsync(db, 'INSERT INTO checklist_items (trip_id, title, is_done) VALUES (?, ?, 0)', [tripId, title]);
-	const rows = await queryAsync<{ id: number }>(db, 'SELECT last_insert_rowid() as id');
-	return rows[0]?.id;
+export async function listChecklistItems(tripId: number): Promise<ChecklistItem[]> {
+  const db = await getDatabase();
+  return await queryAsync<ChecklistItem>(
+    db,
+    'SELECT * FROM checklist_items WHERE trip_id = ? ORDER BY created_at ASC',
+    [tripId]
+  );
 }
 
-export async function toggleChecklistItem(id: number, done: boolean): Promise<void> {
-	const db = await getDatabase();
-	await executeAsync(db, 'UPDATE checklist_items SET is_done = ? WHERE id = ?', [done ? 1 : 0, id]);
+export async function toggleChecklistItem(itemId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'UPDATE checklist_items SET is_checked = NOT is_checked WHERE id = ?',
+    [itemId]
+  );
 }
 
-export async function deleteChecklistItem(id: number): Promise<void> {
-	const db = await getDatabase();
-	await executeAsync(db, 'DELETE FROM checklist_items WHERE id = ?', [id]);
+export async function updateChecklistItem(itemId: number, text: string): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'UPDATE checklist_items SET text = ? WHERE id = ?',
+    [text, itemId]
+  );
 }
 
-
+export async function deleteChecklistItem(itemId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'DELETE FROM checklist_items WHERE id = ?',
+    [itemId]
+  );
+}

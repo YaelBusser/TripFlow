@@ -52,6 +52,8 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
 			title TEXT NOT NULL,
+			destination TEXT,
+			description TEXT,
 			start_date INTEGER,
 			end_date INTEGER,
 			cover_uri TEXT,
@@ -96,11 +98,49 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 		`CREATE TABLE IF NOT EXISTS checklist_items (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			trip_id INTEGER NOT NULL,
-			title TEXT NOT NULL,
-			is_done INTEGER NOT NULL DEFAULT 0,
+			text TEXT NOT NULL,
+			is_checked INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL DEFAULT 0,
 			FOREIGN KEY(trip_id) REFERENCES trips(id) ON DELETE CASCADE
 		);`
 	);
+
+	// Add new columns to trips table if they don't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN destination TEXT;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+	
+	try {
+		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN description TEXT;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Add created_at column to checklist_items if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE checklist_items ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Migrate checklist_items columns if needed
+	try {
+		await executeAsync(db, 'ALTER TABLE checklist_items ADD COLUMN text TEXT;');
+		await executeAsync(db, 'UPDATE checklist_items SET text = title WHERE text IS NULL;');
+		await executeAsync(db, 'ALTER TABLE checklist_items DROP COLUMN title;');
+	} catch (e) {
+		// Migration already done or not needed
+	}
+
+	try {
+		await executeAsync(db, 'ALTER TABLE checklist_items ADD COLUMN is_checked INTEGER;');
+		await executeAsync(db, 'UPDATE checklist_items SET is_checked = is_done WHERE is_checked IS NULL;');
+		await executeAsync(db, 'ALTER TABLE checklist_items DROP COLUMN is_done;');
+	} catch (e) {
+		// Migration already done or not needed
+	}
 
 	// simple session table to persist current logged-in user
 	await executeAsync(
