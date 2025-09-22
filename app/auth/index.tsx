@@ -1,7 +1,9 @@
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, ImageBackground, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { login, signUp } from '../../lib/auth';
+import { colors } from '../../lib/colors';
 import { setCurrentUser } from '../../lib/session';
 
 export default function AuthScreen() {
@@ -12,6 +14,8 @@ export default function AuthScreen() {
 	const [mode, setMode] = useState<'login' | 'signup'>('login');
 	const [loading, setLoading] = useState(false);
 	const [errors, setErrors] = useState<Record<string, string>>({});
+	const [showPassword, setShowPassword] = useState(false);
+	const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
 	function validateEmail(email: string): boolean {
 		const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -87,13 +91,24 @@ export default function AuthScreen() {
 	}
 
 	return (
-		<KeyboardAvoidingView 
-			style={styles.container} 
-			behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+		<ImageBackground 
+			source={require('../../assets/images/splash-screen.png')} 
+			style={styles.container}
+			resizeMode="cover"
 		>
-			<ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-				<Text style={styles.title}>TripFlow</Text>
-				<Text style={styles.subtitle}>Organisez vos voyages en toute simplicité</Text>
+			<KeyboardAvoidingView 
+				style={styles.keyboardContainer} 
+				behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+			>
+				<ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+					<View style={styles.logoContainer}>
+						<Image 
+							source={require('../../assets/images/icon.png')} 
+							style={styles.logo}
+						/>
+						<Text style={styles.title}>TripFlow</Text>
+					</View>
+					<Text style={styles.subtitle}>Organisez vos voyages en toute simplicité</Text>
 				
 				<View style={styles.card}>
 					<Text style={styles.cardTitle}>{mode === 'login' ? 'Connexion' : 'Inscription'}</Text>
@@ -127,30 +142,54 @@ export default function AuthScreen() {
 					/>
 					{errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
 
-					<TextInput
-						style={[styles.input, errors.password && styles.inputError]}
-						placeholder="Mot de passe"
-						secureTextEntry
-						value={password}
-						onChangeText={(text) => {
-							setPassword(text);
-							if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
-						}}
-					/>
+					<View style={styles.passwordContainer}>
+						<TextInput
+							style={[styles.input, styles.passwordInput, errors.password && styles.inputError]}
+							placeholder="Mot de passe"
+							secureTextEntry={!showPassword}
+							value={password}
+							onChangeText={(text) => {
+								setPassword(text);
+								if (errors.password) setErrors(prev => ({ ...prev, password: '' }));
+							}}
+						/>
+						<Pressable 
+							style={styles.eyeButton}
+							onPress={() => setShowPassword(!showPassword)}
+						>
+							<MaterialCommunityIcons 
+								name={showPassword ? "eye-off" : "eye"} 
+								size={20} 
+								color="#64748b" 
+							/>
+						</Pressable>
+					</View>
 					{errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
 
 					{mode === 'signup' && (
 						<>
-							<TextInput
-								style={[styles.input, errors.confirmPassword && styles.inputError]}
-								placeholder="Confirmer le mot de passe"
-								secureTextEntry
-								value={confirmPassword}
-								onChangeText={(text) => {
-									setConfirmPassword(text);
-									if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: '' }));
-								}}
-							/>
+							<View style={styles.passwordContainer}>
+								<TextInput
+									style={[styles.input, styles.passwordInput, errors.confirmPassword && styles.inputError]}
+									placeholder="Confirmer le mot de passe"
+									secureTextEntry={!showConfirmPassword}
+									value={confirmPassword}
+									onChangeText={(text) => {
+										setConfirmPassword(text);
+										if (errors.confirmPassword) setErrors(prev => ({ ...prev, confirmPassword: '' }));
+									}}
+								/>
+								<Pressable 
+									style={styles.eyeButton}
+									onPress={() => setShowConfirmPassword(!showConfirmPassword)}
+								>
+									<MaterialCommunityIcons 
+										name={showConfirmPassword ? "eye-off" : "eye"} 
+										size={20} 
+										color="#64748b" 
+									/>
+								</Pressable>
+							</View>
 							{errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
 						</>
 					)}
@@ -171,6 +210,8 @@ export default function AuthScreen() {
 							setErrors({});
 							setName('');
 							setConfirmPassword('');
+							setShowPassword(false);
+							setShowConfirmPassword(false);
 						}}
 						style={styles.switchButton}
 					>
@@ -179,43 +220,62 @@ export default function AuthScreen() {
 						</Text>
 					</Pressable>
 				</View>
-			</ScrollView>
-		</KeyboardAvoidingView>
+				</ScrollView>
+			</KeyboardAvoidingView>
+		</ImageBackground>
 	);
 }
 
 const styles = StyleSheet.create({
 	container: {
 		flex: 1,
-		backgroundColor: '#0f172a',
+	},
+	keyboardContainer: {
+		flex: 1,
+		backgroundColor: 'rgba(47, 182, 161, 0.9)', // Keppel avec transparence
 	},
 	scrollContainer: {
 		flexGrow: 1,
 		justifyContent: 'center',
 		padding: 24,
 	},
+	logoContainer: {
+		alignItems: 'center',
+		marginBottom: 16,
+	},
+	logo: {
+		width: 80,
+		height: 80,
+		borderRadius: 40,
+		marginBottom: 12,
+		shadowColor: colors.shadowMedium,
+		shadowOpacity: 1,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
 	title: {
 		fontSize: 42,
 		fontWeight: '900',
-		color: 'white',
+		color: colors.white,
 		textAlign: 'center',
 		marginBottom: 8,
 		letterSpacing: -1,
 	},
 	subtitle: {
 		fontSize: 16,
-		color: '#94a3b8',
+		color: colors.eggshell,
 		textAlign: 'center',
 		marginBottom: 32,
 		fontWeight: '500',
 	},
 	card: {
 		width: '100%',
-		backgroundColor: 'white',
+		backgroundColor: colors.white,
 		borderRadius: 20,
 		padding: 24,
-		shadowColor: '#000',
-		shadowOpacity: 0.15,
+		shadowColor: colors.shadowDark,
+		shadowOpacity: 1,
 		shadowRadius: 20,
 		shadowOffset: { width: 0, height: 10 },
 		elevation: 8,
@@ -225,42 +285,56 @@ const styles = StyleSheet.create({
 		fontWeight: '800',
 		marginBottom: 20,
 		textAlign: 'center',
-		color: '#1e293b',
+		color: colors.textPrimary,
 	},
 	input: {
 		borderWidth: 2,
-		borderColor: '#e2e8f0',
+		borderColor: colors.borderLight,
 		borderRadius: 12,
 		paddingHorizontal: 16,
 		paddingVertical: 14,
 		marginBottom: 8,
 		fontSize: 16,
-		backgroundColor: '#f8fafc',
+		backgroundColor: colors.backgroundSecondary,
+	},
+	passwordContainer: {
+		position: 'relative',
+		marginBottom: 8,
+	},
+	passwordInput: {
+		paddingRight: 50,
+		marginBottom: 0,
+	},
+	eyeButton: {
+		position: 'absolute',
+		right: 16,
+		top: 14,
+		padding: 4,
 	},
 	inputError: {
-		borderColor: '#ef4444',
+		borderColor: colors.error,
 		backgroundColor: '#fef2f2',
 	},
 	errorText: {
-		color: '#ef4444',
+		color: colors.error,
 		fontSize: 14,
 		marginBottom: 12,
 		fontWeight: '600',
 	},
 	button: {
-		backgroundColor: '#2563eb',
+		backgroundColor: colors.keppel,
 		borderRadius: 12,
 		paddingVertical: 16,
 		alignItems: 'center',
 		marginTop: 8,
-		shadowColor: '#2563eb',
+		shadowColor: colors.keppel,
 		shadowOpacity: 0.3,
 		shadowRadius: 8,
 		shadowOffset: { width: 0, height: 4 },
 		elevation: 4,
 	},
 	buttonText: {
-		color: 'white',
+		color: colors.white,
 		fontWeight: '800',
 		fontSize: 16,
 	},
@@ -270,7 +344,7 @@ const styles = StyleSheet.create({
 	},
 	switchText: {
 		textAlign: 'center',
-		color: '#2563eb',
+		color: colors.cambridgeBlue,
 		fontWeight: '700',
 		fontSize: 16,
 	},

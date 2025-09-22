@@ -3,7 +3,9 @@ import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import LocationIcon from '../../../components/ui/location-icon';
 import { createStep, listSteps, Step } from '../../../lib/steps';
+import { getTrip } from '../../../lib/trips';
 
 let MapView: any = null;
 let Marker: any = null;
@@ -31,12 +33,38 @@ export default function TripMapScreen() {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [searchResults, setSearchResults] = useState<any[]>([]);
 	const [isSearching, setIsSearching] = useState(false);
+	const [startingPoint, setStartingPoint] = useState<{ latitude: number; longitude: number } | null>(null);
+	const [finalDestination, setFinalDestination] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
+	const [isReordering, setIsReordering] = useState(false);
+	const [draggedStep, setDraggedStep] = useState<Step | null>(null);
+	const [showLegend, setShowLegend] = useState(false);
 	const mapRef = useRef<any>(null);
 
 	const loadSteps = useCallback(async () => {
 		if (!id) return;
 		const data = await listSteps(id);
 		setSteps(data);
+		
+		// Le point de départ doit être défini manuellement par l'utilisateur
+		// Pour l'instant, on ne définit pas automatiquement de point de départ
+		setStartingPoint(null);
+		
+		// Charger la destination finale du voyage
+		const trip = await getTrip(id);
+		if (trip?.destination) {
+			try {
+				const results = await Location.geocodeAsync(trip.destination);
+				if (results.length > 0) {
+					setFinalDestination({
+						latitude: results[0].latitude,
+						longitude: results[0].longitude,
+						name: trip.destination
+					});
+				}
+			} catch (error) {
+				console.log('Erreur lors de la géocodification de la destination:', error);
+			}
+		}
 	}, [id]);
 
 	useEffect(() => {
@@ -66,22 +94,66 @@ export default function TripMapScreen() {
 	);
 
 	const region = useMemo(() => {
-		if (steps.length === 0) {
-			// Default to Paris if no steps
-			return { latitude: 48.8566, longitude: 2.3522, latitudeDelta: 0.1, longitudeDelta: 0.1 };
+		// Si on est en mode ajout d'étape et qu'on a une position actuelle, zoomer dessus
+		if (showAddForm && currentLocation) {
+			return { 
+				latitude: currentLocation.latitude, 
+				longitude: currentLocation.longitude, 
+				latitudeDelta: 0.01, 
+				longitudeDelta: 0.01 
+			};
 		}
-		const lats = steps.map(s => s.latitude);
-		const lngs = steps.map(s => s.longitude);
+		
+		// Si pas d'étapes, centrer sur la position actuelle
+		if (steps.length === 0) {
+			if (currentLocation) {
+				return { 
+					latitude: currentLocation.latitude, 
+					longitude: currentLocation.longitude, 
+					latitudeDelta: 0.1, 
+					longitudeDelta: 0.1 
+				};
+			}
+			// Si pas de position actuelle, centrer sur la France (centre géographique)
+			return { latitude: 46.2276, longitude: 2.2137, latitudeDelta: 2.0, longitudeDelta: 2.0 };
+		}
+		
+		// Centrer sur le voyage complet (du point de départ aux étapes + destination finale)
+		const allPoints = [...steps];
+		if (finalDestination) {
+			const finalDestinationStep: Step = {
+				id: -1, // ID temporaire pour la destination finale
+				trip_id: Number(tripId),
+				name: finalDestination.name,
+				description: 'Destination finale',
+				latitude: finalDestination.latitude,
+				longitude: finalDestination.longitude,
+				order_index: steps.length + 1,
+			};
+			allPoints.push(finalDestinationStep);
+		}
+		
+		const lats = allPoints.map(s => s.latitude);
+		const lngs = allPoints.map(s => s.longitude);
 		const minLat = Math.min(...lats);
 		const maxLat = Math.max(...lats);
 		const minLng = Math.min(...lngs);
 		const maxLng = Math.max(...lngs);
+		
+		// Calculer le centre du voyage
 		const latitude = (minLat + maxLat) / 2;
 		const longitude = (minLng + maxLng) / 2;
-		const latitudeDelta = Math.max(0.1, (maxLat - minLat) * 1.8 || 0.6);
-		const longitudeDelta = Math.max(0.1, (maxLng - minLng) * 1.8 || 0.6);
+		
+		// Calculer les deltas pour inclure tout le voyage avec une marge
+		const latRange = maxLat - minLat;
+		const lngRange = maxLng - minLng;
+		const margin = 0.1; // Marge de 10% autour du voyage
+		
+		const latitudeDelta = Math.max(0.05, latRange * 1.2 + margin);
+		const longitudeDelta = Math.max(0.05, lngRange * 1.2 + margin);
+		
 		return { latitude, longitude, latitudeDelta, longitudeDelta };
-	}, [steps]);
+	}, [steps, showAddForm, currentLocation, finalDestination, id]);
 
 	const handleMapPress = async (event: any) => {
 		if (showAddForm) {
@@ -103,6 +175,11 @@ export default function TripMapScreen() {
 		}
 
 		try {
+			// Si c'est la première étape, la définir comme point de départ
+			if (steps.length === 0) {
+				setStartingPoint(selectedLocation);
+			}
+
 			await createStep({
 				trip_id: id,
 				name: stepName.trim(),
@@ -197,35 +274,20 @@ export default function TripMapScreen() {
 
 		setIsSearching(true);
 		try {
-			// Use Google Places API or similar geocoding service
-			// For now, we'll use a simple mock search
-			const mockResults = [
-				{
-					id: '1',
-					name: `${query} - Centre-ville`,
-					address: 'Centre-ville, France',
-					latitude: 48.8566 + (Math.random() - 0.5) * 0.1,
-					longitude: 2.3522 + (Math.random() - 0.5) * 0.1,
-				},
-				{
-					id: '2',
-					name: `${query} - Gare`,
-					address: 'Gare, France',
-					latitude: 48.8566 + (Math.random() - 0.5) * 0.1,
-					longitude: 2.3522 + (Math.random() - 0.5) * 0.1,
-				},
-				{
-					id: '3',
-					name: `${query} - Aéroport`,
-					address: 'Aéroport, France',
-					latitude: 48.8566 + (Math.random() - 0.5) * 0.1,
-					longitude: 2.3522 + (Math.random() - 0.5) * 0.1,
-				},
-			];
+			// Utiliser l'API de géocodage d'Expo Location
+			const results = await Location.geocodeAsync(query);
+			const searchResults = results.map((result, index) => ({
+				id: `${index}`,
+				name: query,
+				address: `${result.latitude.toFixed(4)}, ${result.longitude.toFixed(4)}`,
+				latitude: result.latitude,
+				longitude: result.longitude,
+			}));
 			
-			setSearchResults(mockResults);
+			setSearchResults(searchResults);
 		} catch (error) {
-			Alert.alert('Erreur', 'Impossible de rechercher l\'emplacement');
+			console.log('Erreur de recherche:', error);
+			setSearchResults([]);
 		} finally {
 			setIsSearching(false);
 		}
@@ -274,6 +336,7 @@ export default function TripMapScreen() {
 						coordinate={{ latitude: s.latitude, longitude: s.longitude }} 
 						title={`${idx + 1}. ${s.name}`} 
 						description={s.description ?? ''} 
+						pinColor="blue"
 					/>
 				))}
 				{selectedLocation && (
@@ -289,14 +352,54 @@ export default function TripMapScreen() {
 						coordinate={currentLocation} 
 						title="Ma position" 
 						description="Votre position actuelle"
-						pinColor="blue"
+						pinColor="purple"
 					/>
 				)}
+				{startingPoint && (
+					<Marker 
+						coordinate={startingPoint} 
+						title="Point de départ" 
+						description="Début du voyage"
+						pinColor="green"
+					/>
+				)}
+				{finalDestination && (
+					<Marker 
+						coordinate={{ latitude: finalDestination.latitude, longitude: finalDestination.longitude }} 
+						title="Destination finale" 
+						description={finalDestination.name}
+						pinColor="orange"
+					/>
+				)}
+				{/* Ligne pointillée entre position actuelle et point de départ */}
+				{currentLocation && startingPoint && (
+					<Polyline 
+						coordinates={[currentLocation, startingPoint]} 
+						strokeColor="#2FB6A1" 
+						strokeWidth={3}
+						strokePattern={[10, 5]} // Ligne pointillée
+					/>
+				)}
+				
+				{/* Lignes reliant les étapes entre elles */}
 				{steps.length > 1 && (
 					<Polyline 
 						coordinates={steps.map(s => ({ latitude: s.latitude, longitude: s.longitude }))} 
 						strokeColor="#10b981" 
 						strokeWidth={4} 
+					/>
+				)}
+				
+				{/* Ligne pointillée vers la destination finale si elle existe */}
+				{steps.length > 0 && finalDestination && (
+					<Polyline 
+						coordinates={[
+							{ latitude: steps[steps.length - 1].latitude, longitude: steps[steps.length - 1].longitude },
+							{ latitude: finalDestination.latitude, longitude: finalDestination.longitude }
+						]} 
+						strokeColor="#f59e0b" 
+						strokeWidth={3}
+						strokePattern={[5, 5]} // Ligne pointillée pour la destination finale
 					/>
 				)}
 			</MapView>
@@ -315,7 +418,7 @@ export default function TripMapScreen() {
 					</Pressable>
 				) : (
 					<Pressable style={styles.locationButton} onPress={handleMyLocation}>
-						<Text style={styles.locationIcon}>📍</Text>
+						<LocationIcon size={20} />
 					</Pressable>
 				)}
 			</View>
@@ -366,7 +469,7 @@ export default function TripMapScreen() {
 					</Text>
 					<TextInput
 						style={styles.input}
-						placeholder="Nom de l'étape (ex: Paris, Tour Eiffel)"
+						placeholder="Nom de l'étape (ex: Tour Eiffel, Lyon)"
 						value={stepName}
 						onChangeText={setStepName}
 					/>
@@ -380,9 +483,12 @@ export default function TripMapScreen() {
 					/>
 					{selectedLocation && (
 						<View style={styles.locationInfo}>
-							<Text style={styles.coords}>
-								📍 {selectedLocation.latitude.toFixed(4)}, {selectedLocation.longitude.toFixed(4)}
-							</Text>
+							<View style={styles.coordsContainer}>
+								<LocationIcon size={16} />
+								<Text style={styles.coords}>
+									{selectedLocation.latitude.toFixed(4)}, {selectedLocation.longitude.toFixed(4)}
+								</Text>
+							</View>
 							<Text style={styles.address}>
 								🏠 {stepName || 'Adresse en cours de chargement...'}
 							</Text>
@@ -398,21 +504,123 @@ export default function TripMapScreen() {
 				</View>
 			)}
 
+			{/* Légende des couleurs - au-dessus du bouton ajouter une étape */}
+			{!showAddForm && showLegend && (
+				<View style={styles.colorLegend}>
+					<Text style={styles.legendTitle}>Légende</Text>
+					<View style={styles.legendItems}>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendDot, { backgroundColor: '#8b5cf6' }]} />
+							<Text style={styles.legendText}>Ma position</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
+							<Text style={styles.legendText}>Point de départ</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendDot, { backgroundColor: '#3b82f6' }]} />
+							<Text style={styles.legendText}>Étapes du voyage</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendDot, { backgroundColor: '#f59e0b' }]} />
+							<Text style={styles.legendText}>Destination finale</Text>
+						</View>
+					</View>
+				</View>
+			)}
+
 			{/* Add step button when not in add mode */}
 			{!showAddForm && (
 				<View style={styles.bottomActions}>
+					{/* Bouton toggle légende - à gauche du bouton principal */}
+					<Pressable 
+						style={[styles.legendToggleButton, showLegend && styles.legendToggleButtonActive]} 
+						onPress={() => setShowLegend(!showLegend)}
+					>
+						<Text style={styles.legendToggleIcon}>
+							{showLegend ? '📊' : '📋'}
+						</Text>
+					</Pressable>
+					
 					<Pressable style={styles.addStepButton} onPress={() => setShowAddForm(true)}>
 						<Text style={styles.addStepButtonText}>+ Ajouter une étape</Text>
+					</Pressable>
+					{steps.length > 1 && (
+						<Pressable 
+							style={[styles.reorderButton, isReordering && styles.reorderButtonActive]} 
+							onPress={() => setIsReordering(!isReordering)}
+						>
+							<Text style={styles.reorderButtonText}>
+								{isReordering ? 'Terminer' : 'Réorganiser'}
+							</Text>
+						</Pressable>
+					)}
+				</View>
+			)}
+
+			{/* Message d'information si pas d'étapes */}
+			{!showAddForm && steps.length === 0 && (
+				<View style={styles.infoMessage}>
+					<Text style={styles.infoIcon}>📍</Text>
+					<Text style={styles.infoTitle}>Aucune étape définie</Text>
+					<Text style={styles.infoText}>Ajoutez votre première étape (point de départ) pour commencer votre voyage</Text>
+				</View>
+			)}
+
+			{/* Message d'information si pas de point de départ défini */}
+			{!showAddForm && steps.length > 0 && !startingPoint && (
+				<View style={styles.infoMessage}>
+					<Text style={styles.infoIcon}>⚠️</Text>
+					<Text style={styles.infoTitle}>Point de départ manquant</Text>
+					<Text style={styles.infoText}>Définissez la première étape comme point de départ pour voir l'itinéraire complet</Text>
+					<Pressable 
+						style={styles.setStartingPointButton} 
+						onPress={() => {
+							if (steps.length > 0) {
+								setStartingPoint({
+									latitude: steps[0].latitude,
+									longitude: steps[0].longitude
+								});
+							}
+						}}
+					>
+						<Text style={styles.setStartingPointButtonText}>Définir comme point de départ</Text>
 					</Pressable>
 				</View>
 			)}
 
-			{/* Recenter button */}
-			<View style={styles.recenterButtonContainer}>
-				<Pressable style={styles.recenterButton} onPress={handleMyLocation}>
-					<Text style={styles.recenterIcon}>🎯</Text>
-				</Pressable>
-			</View>
+			{/* Message d'information si pas de destination finale */}
+			{!showAddForm && steps.length > 0 && !finalDestination && (
+				<View style={styles.infoMessage}>
+					<Text style={styles.infoIcon}>🎯</Text>
+					<Text style={styles.infoTitle}>Destination finale manquante</Text>
+					<Text style={styles.infoText}>Définissez une destination finale dans les paramètres du voyage</Text>
+				</View>
+			)}
+			
+			{/* Liste des étapes pour réorganisation */}
+			{isReordering && steps.length > 0 && (
+				<View style={styles.stepsListContainer}>
+					<Text style={styles.stepsListTitle}>Réorganiser les étapes</Text>
+					<FlatList
+						data={steps.sort((a, b) => (a.order_index || 0) - (b.order_index || 0))}
+						keyExtractor={(item) => String(item.id)}
+						renderItem={({ item, index }) => (
+							<View style={styles.stepItem}>
+								<Text style={styles.stepNumber}>{index + 1}</Text>
+								<Text style={styles.stepName}>{item.name}</Text>
+								<Pressable 
+									style={styles.dragHandle}
+									onPress={() => setDraggedStep(item)}
+								>
+									<Text style={styles.dragIcon}>⋮⋮</Text>
+								</Pressable>
+							</View>
+						)}
+						style={styles.stepsList}
+					/>
+				</View>
+			)}
 		</View>
 	);
 }
@@ -524,11 +732,17 @@ const styles = StyleSheet.create({
 		marginBottom: 16,
 		alignItems: 'center',
 	},
+	coordsContainer: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		justifyContent: 'center',
+		marginBottom: 4,
+	},
 	coords: {
 		fontSize: 12,
 		color: '#6b7280',
 		textAlign: 'center',
-		marginBottom: 4,
+		marginLeft: 4,
 		fontWeight: '600',
 	},
 	address: {
@@ -563,7 +777,9 @@ const styles = StyleSheet.create({
 		bottom: 30,
 		left: 16,
 		right: 16,
+		flexDirection: 'row',
 		alignItems: 'center',
+		gap: 12,
 	},
 	addStepButton: {
 		backgroundColor: '#10b981',
@@ -580,6 +796,79 @@ const styles = StyleSheet.create({
 		color: 'white',
 		fontWeight: '800',
 		fontSize: 16,
+	},
+	reorderButton: {
+		backgroundColor: '#6b7280',
+		borderRadius: 25,
+		paddingHorizontal: 20,
+		paddingVertical: 12,
+		marginTop: 8,
+	},
+	reorderButtonActive: {
+		backgroundColor: '#10b981',
+	},
+	reorderButtonText: {
+		color: 'white',
+		fontWeight: '600',
+		fontSize: 14,
+	},
+	stepsListContainer: {
+		position: 'absolute',
+		bottom: 100,
+		left: 16,
+		right: 16,
+		backgroundColor: 'white',
+		borderRadius: 12,
+		padding: 16,
+		maxHeight: 200,
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
+	stepsListTitle: {
+		fontSize: 16,
+		fontWeight: '700',
+		color: '#1f2937',
+		marginBottom: 12,
+	},
+	stepsList: {
+		maxHeight: 120,
+	},
+	stepItem: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		paddingVertical: 8,
+		paddingHorizontal: 12,
+		backgroundColor: '#f9fafb',
+		borderRadius: 8,
+		marginBottom: 4,
+	},
+	stepNumber: {
+		width: 24,
+		height: 24,
+		borderRadius: 12,
+		backgroundColor: '#10b981',
+		color: 'white',
+		textAlign: 'center',
+		lineHeight: 24,
+		fontWeight: '700',
+		fontSize: 12,
+		marginRight: 12,
+	},
+	stepName: {
+		flex: 1,
+		fontSize: 14,
+		fontWeight: '600',
+		color: '#374151',
+	},
+	dragHandle: {
+		padding: 4,
+	},
+	dragIcon: {
+		fontSize: 16,
+		color: '#9ca3af',
 	},
 	searchContainer: {
 		position: 'absolute',
@@ -663,6 +952,113 @@ const styles = StyleSheet.create({
 	},
 	recenterIcon: {
 		fontSize: 24,
+	},
+	infoMessage: {
+		position: 'absolute',
+		top: 100,
+		left: 16,
+		right: 16,
+		backgroundColor: 'white',
+		borderRadius: 12,
+		padding: 16,
+		alignItems: 'center',
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
+	infoIcon: {
+		fontSize: 32,
+		marginBottom: 8,
+	},
+	infoTitle: {
+		fontSize: 18,
+		fontWeight: '700',
+		color: '#1f2937',
+		marginBottom: 4,
+		textAlign: 'center',
+	},
+	infoText: {
+		fontSize: 14,
+		color: '#6b7280',
+		textAlign: 'center',
+		lineHeight: 20,
+	},
+	colorLegend: {
+		position: 'absolute',
+		bottom: 100, // Juste au-dessus du bouton "Ajouter une étape"
+		left: 16,
+		backgroundColor: 'white',
+		borderRadius: 12,
+		padding: 12,
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+		minWidth: 200,
+		maxWidth: 280,
+	},
+	legendTitle: {
+		fontSize: 14,
+		fontWeight: '700',
+		color: '#1f2937',
+		marginBottom: 8,
+		textAlign: 'center',
+	},
+	legendItems: {
+		gap: 6,
+	},
+	legendItem: {
+		flexDirection: 'row',
+		alignItems: 'center',
+		gap: 8,
+	},
+	legendDot: {
+		width: 12,
+		height: 12,
+		borderRadius: 6,
+	},
+	legendText: {
+		fontSize: 12,
+		color: '#374151',
+		fontWeight: '500',
+	},
+	legendToggleButton: {
+		width: 50,
+		height: 50,
+		borderRadius: 25,
+		backgroundColor: 'white',
+		borderWidth: 2,
+		borderColor: '#d1d5db',
+		alignItems: 'center',
+		justifyContent: 'center',
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
+	legendToggleButtonActive: {
+		backgroundColor: '#10b981',
+		borderColor: '#059669',
+	},
+	legendToggleIcon: {
+		fontSize: 20,
+	},
+	setStartingPointButton: {
+		backgroundColor: '#10b981',
+		borderRadius: 8,
+		paddingHorizontal: 16,
+		paddingVertical: 8,
+		marginTop: 12,
+		alignSelf: 'center',
+	},
+	setStartingPointButtonText: {
+		color: 'white',
+		fontSize: 14,
+		fontWeight: '600',
 	},
 });
 

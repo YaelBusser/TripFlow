@@ -105,6 +105,33 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 		);`
 	);
 
+	// trip images (multiple images per trip)
+	await executeAsync(
+		db,
+		`CREATE TABLE IF NOT EXISTS trip_images (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			trip_id INTEGER NOT NULL,
+			image_uri TEXT NOT NULL,
+			order_index INTEGER DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			FOREIGN KEY(trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		);`
+	);
+
+	// trip participants
+	await executeAsync(
+		db,
+		`CREATE TABLE IF NOT EXISTS trip_participants (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			trip_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			email TEXT,
+			phone TEXT,
+			created_at INTEGER NOT NULL,
+			FOREIGN KEY(trip_id) REFERENCES trips(id) ON DELETE CASCADE
+		);`
+	);
+
 	// Add new columns to trips table if they don't exist
 	try {
 		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN destination TEXT;');

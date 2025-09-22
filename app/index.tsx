@@ -1,6 +1,6 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { getCurrentUser } from '../lib/session';
+import { getCurrentUser, isSessionValid } from '../lib/session';
 
 export default function Index() {
 	const [ready, setReady] = useState(false);
@@ -8,9 +8,24 @@ export default function Index() {
 
 	useEffect(() => {
 		(async () => {
-			const user = await getCurrentUser();
-			setLoggedIn(!!user);
-			setReady(true);
+			try {
+				// Vérifier d'abord si la session est valide
+				const isValid = await isSessionValid();
+				if (!isValid) {
+					setLoggedIn(false);
+					setReady(true);
+					return;
+				}
+
+				// Si la session est valide, récupérer l'utilisateur
+				const user = await getCurrentUser();
+				setLoggedIn(!!user);
+			} catch (error) {
+				console.error('Erreur lors de la vérification de la session:', error);
+				setLoggedIn(false);
+			} finally {
+				setReady(true);
+			}
 		})();
 	}, []);
 

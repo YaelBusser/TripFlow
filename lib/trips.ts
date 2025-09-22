@@ -39,5 +39,22 @@ export async function updateTripCover(id: number, coverUri: string): Promise<voi
 	await executeAsync(db, 'UPDATE trips SET cover_uri = ? WHERE id = ?', [coverUri, id]);
 }
 
+export async function updateTrip(
+	id: number, 
+	title: string, 
+	destination?: string | null, 
+	description?: string | null, 
+	startDate?: number | null, 
+	endDate?: number | null, 
+	coverUri?: string | null
+): Promise<void> {
+	const db = await getDatabase();
+	await executeAsync(
+		db, 
+		'UPDATE trips SET title = ?, destination = ?, description = ?, start_date = ?, end_date = ?, cover_uri = ? WHERE id = ?', 
+		[title, destination ?? null, description ?? null, startDate ?? null, endDate ?? null, coverUri ?? null, id]
+	);
+}
+
 
 

@@ -1,0 +1,61 @@
+export default {
+  expo: {
+    name: "TripFlow",
+    slug: "TripFlow",
+    version: "1.0.0",
+    orientation: "portrait",
+    icon: "./assets/images/icon.png",
+    scheme: "tripflow",
+    userInterfaceStyle: "automatic",
+    newArchEnabled: true,
+    splash: {
+      image: "./assets/images/splash-screen.png",
+      resizeMode: "cover",
+      backgroundColor: "#2FB6A1",
+      dark: {
+        image: "./assets/images/splash-screen.png",
+        resizeMode: "cover",
+        backgroundColor: "#259B8A"
+      }
+    },
+    ios: {
+      supportsTablet: true,
+      bundleIdentifier: "com.tripflow.app"
+    },
+    android: {
+      adaptiveIcon: {
+        backgroundColor: "#2FB6A1",
+        foregroundImage: "./assets/images/icon.png",
+        backgroundImage: "./assets/images/icon.png"
+      },
+      package: "com.tripflow.app",
+      edgeToEdgeEnabled: true,
+      predictiveBackGestureEnabled: false
+    },
+    web: {
+      output: "static",
+      favicon: "./assets/images/icon.png"
+    },
+    plugins: [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/images/splash-screen.png",
+          resizeMode: "cover",
+          backgroundColor: "#2FB6A1",
+          dark: {
+            image: "./assets/images/splash-screen.png",
+            resizeMode: "cover",
+            backgroundColor: "#259B8A"
+          }
+        }
+      ],
+      "expo-sqlite"
+    ],
+    experiments: {
+      typedRoutes: true,
+      reactCompiler: true
+    }
+  }
+};

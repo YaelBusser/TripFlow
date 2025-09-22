@@ -1,13 +1,19 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import LocationIcon from '../../../components/ui/location-icon';
 import { ChecklistItem, listChecklistItems, toggleChecklistItem } from '../../../lib/checklist';
+import { colors } from '../../../lib/colors';
 import { JournalEntry, listJournal } from '../../../lib/journal';
+import { getCurrentUser } from '../../../lib/session';
 import { deleteStep, listSteps, Step } from '../../../lib/steps';
-import { getTrip, Trip } from '../../../lib/trips';
+import { addTripImage, deleteTripImage, getTripImages, setTripCoverImage, TripImage, updateTripImageOrder } from '../../../lib/trip-images';
+import { addTripParticipant, deleteTripParticipant, getTripParticipants, TripParticipant } from '../../../lib/trip-participants';
+import { deleteTrip, getTrip, Trip, updateTrip } from '../../../lib/trips';
 
 export default function TripDetailsHero() {
   const { tripId } = useLocalSearchParams<{ tripId: string }>();
@@ -16,46 +22,58 @@ export default function TripDetailsHero() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [notes, setNotes] = useState<JournalEntry[]>([]);
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
+  const [tripImages, setTripImages] = useState<TripImage[]>([]);
+  const [tripParticipants, setTripParticipants] = useState<TripParticipant[]>([]);
+  const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [showParticipantsModal, setShowParticipantsModal] = useState(false);
+  const [showAddParticipantModal, setShowAddParticipantModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [newParticipantName, setNewParticipantName] = useState('');
+  const [newParticipantEmail, setNewParticipantEmail] = useState('');
+  const [newParticipantPhone, setNewParticipantPhone] = useState('');
+  const [draggedImageId, setDraggedImageId] = useState<number | null>(null);
+  const [draggedOverImageId, setDraggedOverImageId] = useState<number | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDestination, setEditDestination] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editStartDate, setEditStartDate] = useState('');
   const [editEndDate, setEditEndDate] = useState('');
   const [editCoverImage, setEditCoverImage] = useState<string | null>(null);
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [startDateValue, setStartDateValue] = useState(new Date());
+  const [endDateValue, setEndDateValue] = useState(new Date());
+  
+  // Variables d'animation pour le carousel
+  const scrollViewRef = useRef<ScrollView>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const screenWidth = Dimensions.get('window').width;
 
-  const getImageSource = (imageName: string) => {
-    switch (imageName) {
-      case 'partial-react-logo.png':
-        return require('../../../assets/images/partial-react-logo.png');
-      case 'splash-icon.png':
-        return require('../../../assets/images/splash-icon.png');
-      default:
-        return require('../../../assets/images/react-logo.png');
-    }
-  };
-
-  // Images par défaut + image de couverture du voyage
+  // Utiliser les images de la base de données ou splash-screen.png comme fallback
   const getImages = () => {
-    const defaultImages = [
-      require('../../../assets/images/react-logo.png'),
-      require('../../../assets/images/partial-react-logo.png'),
-      require('../../../assets/images/splash-icon.png'),
-    ];
-    
-    if (trip?.cover_uri) {
-      const coverImage = getImageSource(trip.cover_uri);
-      return [coverImage, ...defaultImages];
+    if (tripImages.length > 0) {
+      return tripImages.map(img => ({ uri: img.image_uri }));
     }
-    
-    return defaultImages;
+    if (trip?.cover_uri && trip.cover_uri.startsWith('file://')) {
+      return [{ uri: trip.cover_uri }];
+    }
+    return [require('../../../assets/images/splash-screen.png')];
   };
 
   const images = getImages();
 
   const loadData = useCallback(async () => {
     if (!id) return;
+    
+    // Charger l'utilisateur actuel
+    const user = await getCurrentUser();
+    if (user) {
+      setCurrentUser(user);
+    }
+    
     const t = await getTrip(id);
     if (t) {
       setTrip(t);
@@ -64,18 +82,27 @@ export default function TripDetailsHero() {
       setEditTitle(t.title);
       setEditDestination(t.destination || '');
       setEditDescription(t.description || '');
-      setEditStartDate(t.start_date || '');
-      setEditEndDate(t.end_date || '');
-      setEditCoverImage(t.cover_uri);
+      setEditStartDate(t.start_date ? new Date(t.start_date).toISOString().split('T')[0] : '');
+      setEditEndDate(t.end_date ? new Date(t.end_date).toISOString().split('T')[0] : '');
+      setEditCoverImage(t.cover_uri || null);
     }
-      const s = await listSteps(id);
-      setSteps(s);
-      if (s[0]) {
-        const j = await listJournal(s[0].id);
-        setNotes(j);
-      }
-      const c = await listChecklistItems(id);
-      setChecklistItems(c);
+    
+    // Charger les images du voyage
+    const images = await getTripImages(id);
+    setTripImages(images);
+    
+    // Charger les participants du voyage
+    const participants = await getTripParticipants(id);
+    setTripParticipants(participants);
+    
+    const s = await listSteps(id);
+    setSteps(s);
+    if (s[0]) {
+      const j = await listJournal(s[0].id);
+      setNotes(j);
+    }
+    const c = await listChecklistItems(id);
+    setChecklistItems(c);
   }, [id]);
 
   useEffect(() => {
@@ -97,9 +124,9 @@ export default function TripDetailsHero() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
-      aspect: [16, 9],
+      aspect: [1, 1],
       quality: 0.8,
     });
 
@@ -112,21 +139,23 @@ export default function TripDetailsHero() {
     if (!trip) return;
     
     try {
-      // Ici on devrait appeler une fonction updateTrip
-      // Pour l'instant on met à jour localement
-      const updatedTrip = {
-        ...trip,
-        title: editTitle,
-        destination: editDestination,
-        description: editDescription,
-        start_date: editStartDate,
-        end_date: editEndDate,
-        cover_uri: editCoverImage || trip.cover_uri,
-      };
-      setTrip(updatedTrip);
+      // Sauvegarder en base de données
+      await updateTrip(
+        trip.id,
+        editTitle,
+        editDestination,
+        editDescription,
+        editStartDate ? new Date(editStartDate).getTime() : null,
+        editEndDate ? new Date(editEndDate).getTime() : null,
+        editCoverImage
+      );
+      
+      // Recharger les données
+      await loadData();
       setShowEditModal(false);
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
+      Alert.alert('Erreur', 'Impossible de sauvegarder les modifications');
     }
   };
 
@@ -161,6 +190,219 @@ export default function TripDetailsHero() {
     }
   };
 
+  const onAddImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      alert('Permission requise pour accéder à la galerie photo');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: 'images',
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      try {
+        await addTripImage(id, result.assets[0].uri);
+        await loadData();
+        Alert.alert('Succès', 'Image ajoutée au voyage');
+      } catch (error) {
+        console.error('Erreur lors de l\'ajout de l\'image:', error);
+        Alert.alert('Erreur', 'Impossible d\'ajouter l\'image');
+      }
+    }
+  };
+
+  const onDeleteImage = async (imageId: number) => {
+    Alert.alert(
+      'Supprimer l\'image',
+      'Êtes-vous sûr de vouloir supprimer cette image ?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTripImage(imageId);
+              await loadData();
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              Alert.alert('Erreur', 'Impossible de supprimer l\'image');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const onSetCoverImage = async (imageUri: string) => {
+    try {
+      await setTripCoverImage(id, imageUri);
+      await loadData();
+      Alert.alert('Succès', 'Image de couverture mise à jour');
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour de l\'image de couverture:', error);
+      Alert.alert('Erreur', 'Impossible de mettre à jour l\'image de couverture');
+    }
+  };
+
+  // Fonctions pour les date pickers
+  const onStartDateChange = (event: any, selectedDate?: Date) => {
+    setShowStartDatePicker(false);
+    if (selectedDate) {
+      setStartDateValue(selectedDate);
+      setEditStartDate(selectedDate.toISOString().split('T')[0]);
+    }
+  };
+
+  const onEndDateChange = (event: any, selectedDate?: Date) => {
+    setShowEndDatePicker(false);
+    if (selectedDate) {
+      setEndDateValue(selectedDate);
+      setEditEndDate(selectedDate.toISOString().split('T')[0]);
+    }
+  };
+
+
+  // Fonction pour ouvrir l'image en plein écran
+  const onImagePress = (index: number) => {
+    setSelectedImageIndex(index);
+    setShowImageModal(true);
+  };
+
+  // Fonction pour changer d'image
+  const goToImage = (index: number) => {
+    if (scrollViewRef.current) {
+      scrollViewRef.current?.scrollTo({
+        x: index * screenWidth,
+        animated: true,
+      });
+      setCurrentImageIndex(index);
+    }
+  };
+
+  // Fonction pour supprimer le voyage
+  const onDeleteTrip = () => {
+    Alert.alert(
+      'Supprimer le voyage',
+      'Êtes-vous sûr de vouloir supprimer ce voyage ? Cette action est irréversible.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTrip(id);
+              Alert.alert('Succès', 'Voyage supprimé avec succès');
+              router.replace('/(tabs)/explore');
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              Alert.alert('Erreur', 'Impossible de supprimer le voyage');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Fonctions pour gérer les participants
+  const onAddParticipant = async () => {
+    if (!newParticipantName.trim()) {
+      Alert.alert('Erreur', 'Le nom est obligatoire');
+      return;
+    }
+
+    try {
+      await addTripParticipant(
+        id, 
+        newParticipantName.trim(), 
+        newParticipantEmail.trim() || null, 
+        newParticipantPhone.trim() || null
+      );
+      
+      // Recharger les participants
+      const participants = await getTripParticipants(id);
+      setTripParticipants(participants);
+      
+      // Réinitialiser le formulaire
+      setNewParticipantName('');
+      setNewParticipantEmail('');
+      setNewParticipantPhone('');
+      setShowAddParticipantModal(false);
+      
+      Alert.alert('Succès', 'Participant ajouté avec succès');
+    } catch (error) {
+      console.error('Erreur lors de l\'ajout:', error);
+      Alert.alert('Erreur', 'Impossible d\'ajouter le participant');
+    }
+  };
+
+  const onDeleteParticipant = (participantId: number, participantName: string) => {
+    Alert.alert(
+      'Supprimer le participant',
+      `Êtes-vous sûr de vouloir supprimer ${participantName} ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteTripParticipant(participantId);
+              const participants = await getTripParticipants(id);
+              setTripParticipants(participants);
+              Alert.alert('Succès', 'Participant supprimé avec succès');
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              Alert.alert('Erreur', 'Impossible de supprimer le participant');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Fonction pour cliquer sur une image et changer son ordre
+  const onImageClick = async (imageId: number) => {
+    if (!draggedImageId) {
+      // Première image cliquée - la sélectionner
+      setDraggedImageId(imageId);
+    } else if (draggedImageId === imageId) {
+      // Même image cliquée - désélectionner
+      setDraggedImageId(null);
+      setDraggedOverImageId(null);
+    } else {
+      // Deuxième image cliquée - échanger avec la première
+      const fromIndex = tripImages.findIndex(img => img.id === draggedImageId);
+      const toIndex = tripImages.findIndex(img => img.id === imageId);
+      
+      if (fromIndex !== -1 && toIndex !== -1) {
+        try {
+          const newImages = [...tripImages];
+          [newImages[fromIndex], newImages[toIndex]] = [newImages[toIndex], newImages[fromIndex]];
+          
+          // Mettre à jour l'ordre dans la base de données
+          for (let i = 0; i < newImages.length; i++) {
+            await updateTripImageOrder(newImages[i].id, i);
+          }
+          
+          await loadData();
+        } catch (error) {
+          console.error('Erreur lors du réordonnement:', error);
+          Alert.alert('Erreur', 'Impossible de réorganiser les images');
+        }
+      }
+      
+      setDraggedImageId(null);
+      setDraggedOverImageId(null);
+    }
+  };
+
   const dateRange = useMemo(() => {
     if (!trip) return '';
     const fmt = (ms?: number | null) => (ms ? new Date(ms).toLocaleDateString() : '');
@@ -172,49 +414,105 @@ export default function TripDetailsHero() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Fixed buttons - outside ScrollView */}
+      <Pressable style={styles.backBtn} onPress={() => router.back()}>
+        <Text style={styles.backIcon}>←</Text>
+      </Pressable>
+      <Pressable style={styles.editBtn} onPress={() => setShowEditModal(true)}>
+        <Text style={styles.editIcon}>✏️</Text>
+      </Pressable>
+      <Pressable style={styles.likeFab}>
+        <Text style={styles.likeIcon}>♡</Text>
+      </Pressable>
+
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
         <View style={styles.heroWrap}>
         <View style={styles.heroContainer}>
-          {/* Fixed buttons */}
-          <Pressable style={styles.backBtn} onPress={() => router.back()}>
-            <Text style={styles.backIcon}>←</Text>
-          </Pressable>
-          <Pressable style={styles.editBtn} onPress={() => setShowEditModal(true)}>
-            <Text style={styles.editIcon}>⚙️</Text>
-          </Pressable>
-          <Pressable style={styles.likeFab}>
-            <Text style={styles.likeIcon}>♡</Text>
-          </Pressable>
           
-          <ScrollView 
+          <Animated.ScrollView 
+            ref={scrollViewRef}
             horizontal 
             pagingEnabled 
             showsHorizontalScrollIndicator={false}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+              { 
+                useNativeDriver: false,
+                listener: (event) => {
+                  // Optionnel : ajouter des logs pour debug si nécessaire
+                }
+              }
+            )}
+            onScrollEndDrag={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
+              setCurrentImageIndex(index);
+            }}
             onMomentumScrollEnd={(event) => {
               const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
               setCurrentImageIndex(index);
             }}
             style={styles.imageScrollView}
+            decelerationRate="normal"
+            snapToInterval={screenWidth - 24}
+            snapToAlignment="start"
+            disableIntervalMomentum={true}
           >
-            {images.map((image, index) => (
-              <ImageBackground
-                key={index}
-                source={image}
-                style={styles.hero}
-                imageStyle={styles.heroImg}
-              >
-              </ImageBackground>
-            ))}
-          </ScrollView>
+            {images.map((image, index) => {
+              const inputRange = [
+                (index - 1) * (screenWidth - 24),
+                index * (screenWidth - 24),
+                (index + 1) * (screenWidth - 24),
+              ];
+              
+              const scale = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.85, 1, 0.85],
+                extrapolate: 'clamp',
+                easing: (t) => t * t * (3 - 2 * t), // Smooth step function
+              });
+              
+              const opacity = scrollX.interpolate({
+                inputRange,
+                outputRange: [0.7, 1, 0.7],
+                extrapolate: 'clamp',
+                easing: (t) => t * t * (3 - 2 * t), // Smooth step function
+              });
+
+              return (
+                <Pressable
+                  key={index}
+                  onPress={() => onImagePress(index)}
+                  style={{ flex: 1 }}
+                >
+                  <Animated.View
+                    style={[
+                      styles.hero,
+                      {
+                        transform: [{ scale }],
+                        opacity,
+                      }
+                    ]}
+                  >
+                    <ImageBackground
+                      source={image}
+                      style={styles.hero}
+                      imageStyle={styles.heroImg}
+                    >
+                    </ImageBackground>
+                  </Animated.View>
+                </Pressable>
+              );
+            })}
+          </Animated.ScrollView>
           
-          {/* Carousel dots */}
+          {/* Carousel dots - positioned over the image at bottom */}
           {images.length > 1 && (
             <View style={styles.carouselDots}>
               {images.map((_, index) => (
                 <Pressable 
                   key={index}
                   style={[styles.dot, index === currentImageIndex && styles.dotActive]} 
-                  onPress={() => setCurrentImageIndex(index)}
+                  onPress={() => goToImage(index)}
                 />
               ))}
             </View>
@@ -224,10 +522,21 @@ export default function TripDetailsHero() {
 
       <View style={styles.content}>
         <View style={styles.locationRow}>
-          <Text style={styles.pinIcon}>📍</Text>
+          <View style={styles.locationIconContainer}>
+            <LocationIcon size={16} color={colors.keppelDark} />
+          </View>
           <Text style={styles.place}>{trip?.destination || 'Destination'}</Text>
+          <View style={styles.participantsBadge}>
+            <Text style={styles.participantsIcon}>👥</Text>
+            <Text style={styles.participantsCount}>{tripParticipants.length + 1}</Text>
+          </View>
         </View>
-        <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
+          <Pressable style={styles.mapButton} onPress={() => router.push(`/trip/${id}/map`)}>
+            <Text style={styles.mapButtonText}>🗺️ Carte</Text>
+          </Pressable>
+        </View>
         <Text style={styles.desc}>
           {trip?.description || 'Aucune description disponible.'}
         </Text>
@@ -237,9 +546,9 @@ export default function TripDetailsHero() {
       {/* Steps Section */}
       <View style={styles.stepsSection}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.section}>Étapes du voyage ({steps.length})</Text>
-          <Pressable style={styles.addStepButton} onPress={() => router.push(`/trip/${id}/map?addStep=true`)}>
-            <Text style={styles.addStepButtonText}>+ Ajouter</Text>
+          <Text style={styles.section}>Étapes du voyage</Text>
+          <Pressable style={styles.manageButton} onPress={() => router.push(`/trip/${id}/map?addStep=true`)}>
+            <Text style={styles.manageButtonText}>Gérer</Text>
           </Pressable>
         </View>
         
@@ -255,9 +564,12 @@ export default function TripDetailsHero() {
                   {step.description && (
                     <Text style={styles.stepDescription}>{step.description}</Text>
                   )}
-                  <Text style={styles.stepCoords}>
-                    📍 {step.latitude.toFixed(4)}, {step.longitude.toFixed(4)}
-                  </Text>
+                  <View style={styles.stepCoordsContainer}>
+                    <LocationIcon size={12} color={colors.keppelDark} />
+                    <Text style={styles.stepCoords}>
+                      {step.latitude.toFixed(4)}, {step.longitude.toFixed(4)}
+                    </Text>
+                  </View>
                 </View>
                 <Pressable 
                   style={styles.deleteStepButton}
@@ -276,11 +588,63 @@ export default function TripDetailsHero() {
         )}
       </View>
 
+      {/* Participants Section */}
+      <View style={styles.participantsSection}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.section}>Participants</Text>
+          <Pressable style={styles.manageButton} onPress={() => setShowParticipantsModal(true)}>
+            <Text style={styles.manageButtonText}>Gérer</Text>
+          </Pressable>
+        </View>
+        
+        <View style={styles.participantsList}>
+          {/* Afficher l'utilisateur actuel en premier */}
+          <View style={[styles.participantItem, styles.currentUserItem]}>
+            <View style={[styles.participantAvatar, styles.currentUserAvatar]}>
+              <Text style={styles.participantInitial}>M</Text>
+            </View>
+            <View style={styles.participantInfo}>
+              <Text style={[styles.participantName, styles.currentUserName]}>Moi</Text>
+            </View>
+          </View>
+          
+          {/* Afficher les autres participants */}
+          {tripParticipants.length > 0 && tripParticipants.slice(0, 2).map((participant) => (
+            <View key={participant.id} style={styles.participantItem}>
+              <View style={styles.participantAvatar}>
+                <Text style={styles.participantInitial}>{participant.name.charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={styles.participantInfo}>
+                <Text style={styles.participantName}>{participant.name}</Text>
+                {participant.email && (
+                  <Text style={styles.participantEmail}>{participant.email}</Text>
+                )}
+              </View>
+            </View>
+          ))}
+          
+          {/* Afficher le compteur s'il y a plus de participants */}
+          {tripParticipants.length > 2 && (
+            <View style={styles.moreParticipants}>
+              <Text style={styles.moreParticipantsText}>+{tripParticipants.length - 2} autres</Text>
+            </View>
+          )}
+          
+          {/* Message si aucun participant ajouté */}
+          {tripParticipants.length === 0 && (
+            <View style={styles.emptyParticipants}>
+              <Text style={styles.emptyParticipantsText}>Aucun participant ajouté</Text>
+              <Text style={styles.emptyParticipantsSubtext}>Invitez des amis à rejoindre votre voyage</Text>
+            </View>
+          )}
+        </View>
+      </View>
+
       <View style={styles.notesSection}>
         <View style={styles.sectionHeader}>
           <Text style={styles.section}>Bloc note de voyages</Text>
-          <Pressable style={styles.journalButton} onPress={() => router.push(`/trip/${id}/journal`)}>
-            <Text style={styles.journalButtonText}>📝 Journal</Text>
+          <Pressable style={styles.manageButton} onPress={() => router.push(`/trip/${id}/journal`)}>
+            <Text style={styles.manageButtonText}>Gérer</Text>
           </Pressable>
         </View>
         
@@ -304,9 +668,9 @@ export default function TripDetailsHero() {
         {/* Checklist Section */}
         <View style={styles.checklistSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.section}>Checklist ({checklistItems.length})</Text>
-            <Pressable style={styles.checklistButton} onPress={() => router.push(`/trip/${id}/checklist`)}>
-              <Text style={styles.checklistButtonText}>✅ Checklist</Text>
+            <Text style={styles.section}>Checklist</Text>
+            <Pressable style={styles.manageButton} onPress={() => router.push(`/trip/${id}/checklist`)}>
+              <Text style={styles.manageButtonText}>Gérer</Text>
             </Pressable>
           </View>
           {checklistItems.length > 0 && (
@@ -383,7 +747,11 @@ export default function TripDetailsHero() {
             </TouchableOpacity>
           </View>
 
-          <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+          <ScrollView 
+            style={styles.modalContent} 
+            contentContainerStyle={styles.modalContentContainer}
+            showsVerticalScrollIndicator={false}
+          >
             <View style={styles.formGroup}>
               <Text style={styles.label}>Titre du voyage *</Text>
               <TextInput
@@ -419,43 +787,279 @@ export default function TripDetailsHero() {
             <View style={styles.dateRow}>
               <View style={styles.dateGroup}>
                 <Text style={styles.label}>Date de début</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editStartDate}
-                  onChangeText={setEditStartDate}
-                  placeholder="DD/MM/YYYY"
-                />
+                <Pressable 
+                  style={styles.dateInput}
+                  onPress={() => setShowStartDatePicker(true)}
+                >
+                  <Text style={[styles.dateText, !editStartDate && styles.placeholderText]}>
+                    {editStartDate || 'Sélectionner'}
+                  </Text>
+                  <Text style={styles.calendarIcon}>📅</Text>
+                </Pressable>
+                {showStartDatePicker && (
+                  <DateTimePicker
+                    value={startDateValue}
+                    mode="date"
+                    display="default"
+                    onChange={onStartDateChange}
+                    minimumDate={new Date()}
+                  />
+                )}
               </View>
               <View style={styles.dateGroup}>
                 <Text style={styles.label}>Date de fin</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editEndDate}
-                  onChangeText={setEditEndDate}
-                  placeholder="DD/MM/YYYY"
-                />
+                <Pressable 
+                  style={styles.dateInput}
+                  onPress={() => setShowEndDatePicker(true)}
+                >
+                  <Text style={[styles.dateText, !editEndDate && styles.placeholderText]}>
+                    {editEndDate || 'Sélectionner'}
+                  </Text>
+                  <Text style={styles.calendarIcon}>📅</Text>
+                </Pressable>
+                {showEndDatePicker && (
+                  <DateTimePicker
+                    value={endDateValue}
+                    mode="date"
+                    display="default"
+                    onChange={onEndDateChange}
+                    minimumDate={editStartDate ? new Date(editStartDate) : new Date()}
+                  />
+                )}
               </View>
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Image de couverture</Text>
-              <Pressable style={styles.imagePicker} onPress={pickImage}>
-                {editCoverImage ? (
-                  <Image source={{ uri: editCoverImage }} style={styles.previewImage} />
-                ) : (
-                  <View style={styles.imagePlaceholder}>
-                    <Text style={styles.imagePlaceholderText}>📷</Text>
-                    <Text style={styles.imagePlaceholderLabel}>Choisir une photo</Text>
-                  </View>
-                )}
-              </Pressable>
+            <View style={styles.imageLibraryFormGroup}>
+              <View style={styles.imageLibraryHeader}>
+                <Text style={styles.label}>Bibliothèque d'images</Text>
+                <Pressable style={styles.addImageButton} onPress={onAddImage}>
+                  <Text style={styles.addImageButtonText}>📷 Ajouter</Text>
+                </Pressable>
+              </View>
+              
+              {tripImages.length > 0 ? (
+                <View style={styles.imageLibraryGrid}>
+                  {tripImages
+                    .sort((a, b) => a.order_index - b.order_index)
+                    .map((img, index) => (
+                    <View key={img.id} style={styles.imageLibraryItem}>
+                      <Pressable
+                        style={[
+                          styles.imageContainer,
+                          draggedImageId === img.id && styles.draggedItem
+                        ]}
+                        onPress={() => onImageClick(img.id)}
+                      >
+                        <Image source={{ uri: img.image_uri }} style={styles.imageLibraryThumbnail} />
+                        <View style={styles.imageOrderIndicator}>
+                          <Text style={styles.imageOrderText}>{img.order_index + 1}</Text>
+                        </View>
+                      </Pressable>
+                      <View style={styles.imageLibraryActions}>
+                        <Pressable 
+                          style={styles.imageLibraryActionButton}
+                          onPress={() => onDeleteImage(img.id)}
+                        >
+                          <Text style={styles.imageLibraryActionText}>✕</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyImageLibrary}>
+                  <Text style={styles.emptyImageLibraryText}>Aucune image</Text>
+                  <Text style={styles.emptyImageLibrarySubtext}>Ajoutez des photos pour commencer</Text>
+                </View>
+              )}
             </View>
 
             <Pressable style={styles.saveButton} onPress={onSaveEdit}>
               <Text style={styles.saveButtonText}>Sauvegarder</Text>
             </Pressable>
+
+            <Pressable style={styles.deleteButton} onPress={onDeleteTrip}>
+              <Text style={styles.deleteButtonText}>🗑️ Supprimer le voyage</Text>
+            </Pressable>
           </ScrollView>
         </SafeAreaView>
+      </Modal>
+
+      {/* Participants Management Modal */}
+      <Modal visible={showParticipantsModal} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Gérer les participants</Text>
+            <TouchableOpacity onPress={() => setShowParticipantsModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView 
+            style={styles.modalContent} 
+            contentContainerStyle={styles.modalContentContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Add Participant Button */}
+            <Pressable 
+              style={styles.addParticipantButton} 
+              onPress={() => setShowAddParticipantModal(true)}
+            >
+              <Text style={styles.addParticipantButtonText}>+ Ajouter un participant</Text>
+            </Pressable>
+
+            {/* Participants List */}
+            <View style={styles.participantsModalList}>
+              {/* Afficher l'utilisateur actuel en premier */}
+              <View style={[styles.participantModalItem, styles.currentUserModalItem]}>
+                <View style={styles.participantModalInfo}>
+                  <View style={[styles.participantAvatar, styles.currentUserAvatar]}>
+                    <Text style={styles.participantInitial}>M</Text>
+                  </View>
+                  <View style={styles.participantDetails}>
+                    <Text style={[styles.participantModalName, styles.currentUserModalName]}>Moi</Text>
+                  </View>
+                </View>
+                {/* Pas de bouton de suppression pour l'utilisateur actuel */}
+              </View>
+              
+              {/* Afficher les autres participants */}
+              {tripParticipants.map((participant) => (
+                <View key={participant.id} style={styles.participantModalItem}>
+                  <View style={styles.participantModalInfo}>
+                    <View style={styles.participantAvatar}>
+                      <Text style={styles.participantInitial}>{participant.name.charAt(0).toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.participantDetails}>
+                      <Text style={styles.participantModalName}>{participant.name}</Text>
+                      {participant.email && (
+                        <Text style={styles.participantModalEmail}>{participant.email}</Text>
+                      )}
+                      {participant.phone && (
+                        <Text style={styles.participantModalPhone}>{participant.phone}</Text>
+                      )}
+                    </View>
+                  </View>
+                  <Pressable 
+                    style={styles.deleteParticipantButton}
+                    onPress={() => onDeleteParticipant(participant.id, participant.name)}
+                  >
+                    <Text style={styles.deleteParticipantButtonText}>🗑️</Text>
+                  </Pressable>
+                </View>
+              ))}
+              
+              {/* Message si aucun participant ajouté */}
+              {tripParticipants.length === 0 && (
+                <View style={styles.emptyParticipantsModal}>
+                  <Text style={styles.emptyParticipantsModalText}>Aucun participant ajouté</Text>
+                  <Text style={styles.emptyParticipantsModalSubtext}>Ajoutez des amis à votre voyage</Text>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Add Participant Modal */}
+      <Modal visible={showAddParticipantModal} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Ajouter un participant</Text>
+            <TouchableOpacity onPress={() => setShowAddParticipantModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView 
+            style={styles.modalContent} 
+            contentContainerStyle={styles.modalContentContainer}
+            showsVerticalScrollIndicator={false}
+          >
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Nom *</Text>
+              <TextInput
+                style={styles.input}
+                value={newParticipantName}
+                onChangeText={setNewParticipantName}
+                placeholder="Ex: Jean Dupont"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Email</Text>
+              <TextInput
+                style={styles.input}
+                value={newParticipantEmail}
+                onChangeText={setNewParticipantEmail}
+                placeholder="Ex: jean@example.com"
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Téléphone</Text>
+              <TextInput
+                style={styles.input}
+                value={newParticipantPhone}
+                onChangeText={setNewParticipantPhone}
+                placeholder="Ex: +33 6 12 34 56 78"
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <Pressable style={styles.saveButton} onPress={onAddParticipant}>
+              <Text style={styles.saveButtonText}>Ajouter le participant</Text>
+            </Pressable>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Image Fullscreen Modal */}
+      <Modal visible={showImageModal} animationType="fade" presentationStyle="fullScreen">
+        <View style={styles.imageModalContainer}>
+          <Pressable 
+            style={styles.imageModalClose}
+            onPress={() => setShowImageModal(false)}
+          >
+            <Text style={styles.imageModalCloseText}>✕</Text>
+          </Pressable>
+          
+          <ScrollView 
+            horizontal 
+            pagingEnabled 
+            showsHorizontalScrollIndicator={false}
+            style={styles.imageModalScrollView}
+            contentOffset={{ x: selectedImageIndex * Dimensions.get('window').width, y: 0 }}
+            onScrollEndDrag={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
+              setSelectedImageIndex(index);
+            }}
+            onMomentumScrollEnd={(event) => {
+              const index = Math.round(event.nativeEvent.contentOffset.x / event.nativeEvent.layoutMeasurement.width);
+              setSelectedImageIndex(index);
+            }}
+          >
+            {images.map((image, index) => (
+              <View key={index} style={styles.imageModalItem}>
+                <Image 
+                  source={image} 
+                  style={styles.imageModalImage}
+                  resizeMode="contain"
+                />
+              </View>
+            ))}
+          </ScrollView>
+          
+          {/* Image counter */}
+          <View style={styles.imageCounter}>
+            <Text style={styles.imageCounterText}>
+              {selectedImageIndex + 1} / {images.length}
+            </Text>
+          </View>
+          
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -467,58 +1071,60 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff' 
   },
   heroWrap: { 
-    padding: 12 
+    paddingHorizontal: 12,
+    paddingVertical: 12 
   },
   heroContainer: {
-    height: 300,
+    height: 400,
+    position: 'relative',
+  },
+  imageContainer: {
     position: 'relative',
   },
   imageScrollView: {
-    height: 300,
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
+    height: 400,
   },
   hero: { 
     width: Dimensions.get('window').width - 24, // Largeur de l'écran moins le padding
-    height: 300, 
-    borderRadius: 24, 
-    overflow: 'hidden', 
+    height: 400, 
+    borderRadius: 24, // BorderRadius pour les coins arrondis
+    overflow: 'hidden', // Pour appliquer le borderRadius sans couper les images
     justifyContent: 'flex-end' 
   },
   heroImg: { 
-    borderRadius: 24 
+    width: '100%',
+    height: '100%',
+    borderRadius: 0 // Pas de borderRadius sur l'image, c'est le container qui gère ça
   },
   backBtn: { 
     position: 'absolute', 
-    top: 28, 
-    left: 28, 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
+    top: 55, 
+    left: 20, 
+    width: 50, 
+    height: 50, 
+    borderRadius: 25, 
     backgroundColor: 'rgba(255,255,255,0.95)', 
     alignItems: 'center', 
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
     zIndex: 10,
   },
   backIcon: { 
-    fontSize: 20, 
+    fontSize: 24, 
     fontWeight: '900', 
-    color: '#0f172a' 
+    color: '#2FB6A1' 
   },
   likeFab: { 
     position: 'absolute', 
-    right: 28, 
-    bottom: 32, 
-    width: 52, 
-    height: 52, 
-    borderRadius: 26, 
+    right: 20, 
+    bottom: 50, 
+    width: 60, 
+    height: 60, 
+    borderRadius: 30, 
     backgroundColor: '#ffffff', 
     alignItems: 'center', 
     justifyContent: 'center', 
@@ -530,41 +1136,41 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   likeIcon: { 
-    fontSize: 20, 
+    fontSize: 24, 
     color: '#ef4444', 
     fontWeight: '900' 
   },
   editBtn: { 
     position: 'absolute', 
-    top: 28, 
-    right: 28, 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
+    top: 55, 
+    right: 20, 
+    width: 50, 
+    height: 50, 
+    borderRadius: 25, 
     backgroundColor: 'rgba(255,255,255,0.95)', 
     alignItems: 'center', 
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 5,
     zIndex: 10,
   },
   editIcon: { 
-    fontSize: 20, 
+    fontSize: 22, 
     fontWeight: '900', 
-    color: '#0f172a' 
+    color: '#2FB6A1' 
   },
   carouselDots: { 
-    alignSelf: 'center', 
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
     flexDirection: 'row', 
     gap: 8, 
-    marginBottom: 20, 
-    backgroundColor: 'rgba(0,0,0,0.3)', 
-    paddingHorizontal: 12, 
-    paddingVertical: 6, 
-    borderRadius: 20 
+    justifyContent: 'center',
   },
   dot: { 
     width: 10, 
@@ -586,16 +1192,21 @@ const styles = StyleSheet.create({
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  locationIconContainer: {
+    marginRight: 8,
   },
   pinIcon: {
     fontSize: 16,
     marginRight: 6,
   },
   place: { 
-    color: '#ef4444', 
+    color: colors.keppelDark, 
     fontWeight: '800', 
     fontSize: 16,
+    flex: 1,
   },
   title: { 
     fontSize: 32, 
@@ -603,6 +1214,8 @@ const styles = StyleSheet.create({
     color: '#0f172a', 
     marginBottom: 12,
     lineHeight: 36,
+    flex: 1,
+    marginRight: 12,
   },
   desc: { 
     color: '#64748b', 
@@ -611,7 +1224,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   dates: { 
-    color: '#0f172a', 
+    color: '#64748b', 
     fontWeight: '700',
     fontSize: 16,
   },
@@ -624,17 +1237,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
-  },
-  addStepButton: {
-    backgroundColor: '#10b981',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  addStepButtonText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 12,
   },
   stepsList: {
     gap: 12,
@@ -691,10 +1293,16 @@ const styles = StyleSheet.create({
     color: '#64748b',
     marginBottom: 4,
   },
+  stepCoordsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
   stepCoords: {
     fontSize: 12,
     color: '#94a3b8',
     fontWeight: '600',
+    marginLeft: 6,
   },
   emptySteps: {
     backgroundColor: 'white',
@@ -727,31 +1335,8 @@ const styles = StyleSheet.create({
     fontWeight: '900', 
     color: '#0f172a',
   },
-  journalButton: {
-    backgroundColor: '#0ea5e9',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  journalButtonText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 12,
-  },
   notesActions: {
     marginBottom: 16,
-  },
-  checklistButton: {
-    backgroundColor: '#9333ea',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignSelf: 'flex-start',
-  },
-  checklistButtonText: {
-    color: 'white',
-    fontWeight: '700',
-    fontSize: 12,
   },
   checklistSection: {
     paddingHorizontal: 20,
@@ -897,10 +1482,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  calendarIcon: {
-    fontSize: 12,
-    marginRight: 4,
-  },
   noteMeta: { 
     color: '#94a3b8', 
     fontSize: 13,
@@ -948,10 +1529,17 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     flex: 1,
+  },
+  modalContentContainer: {
     padding: 20,
+    paddingBottom: 100,
   },
   formGroup: {
     marginBottom: 20,
+  },
+  imageLibraryFormGroup: {
+    marginBottom: 20,
+    marginTop: 30,
   },
   label: {
     fontSize: 16,
@@ -1008,12 +1596,29 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontWeight: '600',
   },
+  deleteButton: {
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 20,
+    shadowColor: '#ef4444',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  deleteButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   saveButton: {
     backgroundColor: '#10b981',
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 12,
     shadowColor: '#10b981',
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -1024,5 +1629,412 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+  },
+  // Date picker styles
+  dateInput: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#374151',
+  },
+  placeholderText: {
+    color: '#94a3b8',
+  },
+  calendarIcon: {
+    fontSize: 16,
+  },
+  // Image library styles
+  imageLibraryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  addImageButton: {
+    backgroundColor: '#2FB6A1',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  addImageButtonText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  imageLibraryScroll: {
+    marginTop: 8,
+  },
+  imageLibraryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  imageLibraryItem: {
+    width: '48%',
+    marginBottom: 12,
+    position: 'relative',
+  },
+  draggedItem: {
+    opacity: 0.5,
+    transform: [{ scale: 1.05 }],
+  },
+  imageLibraryThumbnail: {
+    width: '100%',
+    height: 150,
+    borderRadius: 12,
+    backgroundColor: '#f8fafc',
+  },
+  imageLibraryActions: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    flexDirection: 'row',
+    gap: 4,
+  },
+  imageLibraryActionButton: {
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageLibraryActionText: {
+    fontSize: 18,
+    color: '#ffffff',
+    fontWeight: '600',
+  },
+  imageOrderIndicator: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: colors.keppel,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  imageOrderText: {
+    fontSize: 10,
+    color: '#ffffff',
+    fontWeight: '700',
+  },
+  emptyImageLibrary: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderStyle: 'dashed',
+  },
+  emptyImageLibraryText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#64748b',
+    marginBottom: 4,
+  },
+  emptyImageLibrarySubtext: {
+    fontSize: 14,
+    color: '#94a3b8',
+  },
+  // Image fullscreen modal styles
+  imageModalContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  imageModalClose: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  imageModalCloseText: {
+    fontSize: 24,
+    color: '#ffffff',
+    fontWeight: '900',
+  },
+  imageModalScrollView: {
+    flex: 1,
+  },
+  imageModalItem: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageModalImage: {
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+    resizeMode: 'contain',
+  },
+  imageCounter: {
+    position: 'absolute',
+    bottom: 50,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  imageCounterText: {
+    fontSize: 16,
+    color: '#ffffff',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    fontWeight: '600',
+  },
+  // Missing styles
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  participantsBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.eggshell,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  participantsIcon: {
+    fontSize: 12,
+    marginRight: 4,
+  },
+  participantsCount: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  // Unified manage button style
+  manageButton: {
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    shadowColor: colors.shadowLight,
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 1,
+  },
+  manageButtonText: {
+    color: colors.textPrimary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mapButton: {
+    backgroundColor: colors.keppel,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    shadowColor: colors.keppel,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+    alignSelf: 'flex-start',
+  },
+  mapButtonText: {
+    color: colors.white,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Participants styles
+  participantsSection: {
+    paddingHorizontal: 20,
+    marginTop: 24,
+    marginBottom: 24,
+  },
+  participantsList: {
+    marginTop: 12,
+  },
+  participantItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    shadowColor: colors.shadowLight,
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  participantAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.keppel,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  participantInitial: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  participantInfo: {
+    flex: 1,
+  },
+  participantName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 2,
+  },
+  participantEmail: {
+    fontSize: 12,
+    color: colors.textSecondary,
+  },
+  moreParticipants: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  moreParticipantsText: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  emptyParticipants: {
+    alignItems: 'center',
+    paddingVertical: 24,
+  },
+  emptyParticipantsText: {
+    fontSize: 16,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  emptyParticipantsSubtext: {
+    fontSize: 14,
+    color: colors.textTertiary,
+  },
+  // Participants modal styles
+  addParticipantButton: {
+    backgroundColor: colors.keppel,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  addParticipantButtonText: {
+    color: colors.white,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  participantsModalList: {
+    marginTop: 12,
+  },
+  participantModalItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.white,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: colors.shadowLight,
+    shadowOpacity: 1,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  participantModalInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  participantDetails: {
+    flex: 1,
+  },
+  participantModalName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  participantModalEmail: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginBottom: 2,
+  },
+  participantModalPhone: {
+    fontSize: 14,
+    color: colors.textSecondary,
+  },
+  deleteParticipantButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#fef2f2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteParticipantButtonText: {
+    fontSize: 16,
+  },
+  emptyParticipantsModal: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyParticipantsModalText: {
+    fontSize: 18,
+    color: colors.textSecondary,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptyParticipantsModalSubtext: {
+    fontSize: 14,
+    color: colors.textTertiary,
+  },
+  // Styles pour l'utilisateur actuel
+  currentUserItem: {
+    backgroundColor: colors.eggshell,
+    borderWidth: 2,
+    borderColor: colors.keppel,
+  },
+  currentUserAvatar: {
+    backgroundColor: colors.keppel,
+  },
+  currentUserName: {
+    color: colors.keppel,
+    fontWeight: '800',
+  },
+  currentUserModalItem: {
+    backgroundColor: colors.eggshell,
+    borderWidth: 2,
+    borderColor: colors.keppel,
+  },
+  currentUserModalName: {
+    color: colors.keppel,
+    fontWeight: '800',
   },
 });
