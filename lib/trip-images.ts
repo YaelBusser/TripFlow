@@ -10,10 +10,17 @@ export type TripImage = {
 
 export async function addTripImage(tripId: number, imageUri: string): Promise<number> {
   const db = await getDatabase();
+  // Calculer le prochain order_index pour append à la fin
+  const rowsMax = await queryAsync<{ maxIndex: number | null }>(
+    db,
+    'SELECT MAX(order_index) as maxIndex FROM trip_images WHERE trip_id = ?',
+    [tripId]
+  );
+  const nextIndex = (rowsMax[0]?.maxIndex ?? -1) + 1;
   await executeAsync(
     db,
     'INSERT INTO trip_images (trip_id, image_uri, order_index, created_at) VALUES (?, ?, ?, ?)',
-    [tripId, imageUri, 0, Date.now()]
+    [tripId, imageUri, nextIndex, Date.now()]
   );
   const rows = await queryAsync<{ id: number }>(db, 'SELECT last_insert_rowid() as id');
   return rows[0]?.id;

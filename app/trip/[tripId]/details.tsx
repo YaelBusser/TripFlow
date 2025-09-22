@@ -1,6 +1,7 @@
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -8,9 +9,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import LocationIcon from '../../../components/ui/location-icon';
 import { ChecklistItem, listChecklistItems, toggleChecklistItem } from '../../../lib/checklist';
 import { colors } from '../../../lib/colors';
-import { JournalEntry, listJournal } from '../../../lib/journal';
+// import { JournalEntry, listJournal } from '../../../lib/journal';
 import { getCurrentUser } from '../../../lib/session';
-import { deleteStep, listSteps, Step } from '../../../lib/steps';
+import { deleteStep, deleteStepImagesByUriForTrip, getTripStepImagesWithSteps, listSteps, Step, updateStep } from '../../../lib/steps';
 import { addTripImage, deleteTripImage, getTripImages, setTripCoverImage, TripImage, updateTripImageOrder } from '../../../lib/trip-images';
 import { addTripParticipant, deleteTripParticipant, getTripParticipants, TripParticipant } from '../../../lib/trip-participants';
 import { deleteTrip, getTrip, Trip, updateTrip } from '../../../lib/trips';
@@ -20,10 +21,12 @@ export default function TripDetailsHero() {
   const id = Number(tripId);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
-  const [notes, setNotes] = useState<JournalEntry[]>([]);
+  // const [notes, setNotes] = useState<JournalEntry[]>([]);
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([]);
   const [tripImages, setTripImages] = useState<TripImage[]>([]);
+  const [carouselImages, setCarouselImages] = useState<any[]>([]);
   const [tripParticipants, setTripParticipants] = useState<TripParticipant[]>([]);
+  const [placeCache, setPlaceCache] = useState<Record<string, string>>({});
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -52,10 +55,10 @@ export default function TripDetailsHero() {
   const scrollX = useRef(new Animated.Value(0)).current;
   const screenWidth = Dimensions.get('window').width;
 
-  // Utiliser les images de la base de données ou splash-screen.png comme fallback
+  // Utiliser les images du carrousel (globales d'abord, puis étapes), ou splash-screen.png en fallback
   const getImages = () => {
-    if (tripImages.length > 0) {
-      return tripImages.map(img => ({ uri: img.image_uri }));
+    if (carouselImages.length > 0) {
+      return (carouselImages as any[]).map((img: any) => (img && img.uri ? img : img?.image_uri ? { uri: img.image_uri } : img));
     }
     if (trip?.cover_uri && trip.cover_uri.startsWith('file://')) {
       return [{ uri: trip.cover_uri }];
@@ -64,6 +67,36 @@ export default function TripDetailsHero() {
   };
 
   const images = getImages();
+
+  const goToMap = () => {
+    if (steps && steps.length > 0) {
+      const dest = steps[steps.length - 1];
+      router.push({
+        pathname: `/trip/${id}/map`,
+        params: { focusLat: String(dest.latitude), focusLng: String(dest.longitude) }
+      });
+    } else {
+      router.push(`/trip/${id}/map`);
+    }
+  };
+
+  // Résoudre le libellé du lieu (reverse géocodage) avec cache
+  const getPlaceLabel = useCallback(async (lat?: number, lng?: number): Promise<string | null> => {
+    if (lat == null || lng == null) return null;
+    const key = `${lat.toFixed(4)},${lng.toFixed(4)}`;
+    if (placeCache[key]) return placeCache[key];
+    try {
+      const res = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      const item = res?.[0];
+      // Réduire à la ville uniquement (fallback sur subregion/region)
+      const city = item?.city || item?.subregion || item?.region || '';
+      const label = city;
+      if (label) setPlaceCache(prev => ({ ...prev, [key]: label }));
+      return label || null;
+    } catch {
+      return null;
+    }
+  }, [placeCache]);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -87,9 +120,26 @@ export default function TripDetailsHero() {
       setEditCoverImage(t.cover_uri || null);
     }
     
-    // Charger les images du voyage
-    const images = await getTripImages(id);
-    setTripImages(images);
+    // Charger les images du voyage (globales gérées dans ce modal) et préparer le carrousel
+    const baseImages = await getTripImages(id); // globales (prioritaires en tête)
+    setTripImages(baseImages);
+    const stepImages = await getTripStepImagesWithSteps(id); // images d'étapes (append dans le carrousel)
+
+    // Pour chaque image globale, si elle existe aussi comme image d'étape, on conserve UNE seule occurrence avec le label d'étape
+    const labeledGlobal = baseImages.map(img => {
+      const match = stepImages.find(s => s.image_uri === img.image_uri);
+      if (match) {
+        return { uri: match.image_uri, __stepName: match.step_name as any, __lat: match.latitude as any, __lng: match.longitude as any };
+      }
+      return { uri: img.image_uri } as any;
+    });
+
+    // Ajouter ensuite uniquement les images d'étapes qui n'existent pas dans les images globales
+    const onlyStep = stepImages
+      .filter(s => !baseImages.find(b => b.image_uri === s.image_uri))
+      .map(s => ({ uri: s.image_uri, __stepName: s.step_name as any, __lat: s.latitude as any, __lng: s.longitude as any }));
+
+    setCarouselImages([...(labeledGlobal as any), ...(onlyStep as any)]);
     
     // Charger les participants du voyage
     const participants = await getTripParticipants(id);
@@ -97,10 +147,7 @@ export default function TripDetailsHero() {
     
     const s = await listSteps(id);
     setSteps(s);
-    if (s[0]) {
-      const j = await listJournal(s[0].id);
-      setNotes(j);
-    }
+    // Notes de voyage supprimées de la page: ne plus charger le journal ici
     const c = await listChecklistItems(id);
     setChecklistItems(c);
   }, [id]);
@@ -160,9 +207,27 @@ export default function TripDetailsHero() {
   };
 
   const onDeleteStep = (stepId: number, stepName: string) => {
+    const isLastStep = steps.length > 0 && steps[steps.length - 1].id === stepId;
+    const isFirstStep = steps.length > 0 && steps[0].id === stepId;
+    
+    // Le point d'arrivée ne peut pas être supprimé, seulement redéfini
+    if (isLastStep) {
+      Alert.alert(
+        'Point d\'arrivée',
+        'Le point d\'arrivée ne peut pas être supprimé. Utilisez le bouton "Redéfinir le lieu" pour le modifier.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
+    
+    let message = `Êtes-vous sûr de vouloir supprimer l'étape "${stepName}" ?`;
+    if (isFirstStep) {
+      message += '\n\n⚠️ Cette étape est votre point de départ. Vous devrez redémarrer l\'aventure pour définir un nouveau point de départ.';
+    }
+    
     Alert.alert(
       'Supprimer l\'étape',
-      `Êtes-vous sûr de vouloir supprimer l'étape "${stepName}" ?`,
+      message,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -171,10 +236,34 @@ export default function TripDetailsHero() {
           onPress: async () => {
             try {
               await deleteStep(stepId);
+              
+              // Réorganiser l'ordre des étapes restantes
+              const remainingSteps = steps.filter(step => step.id !== stepId);
+              for (let i = 0; i < remainingSteps.length; i++) {
+                await updateStep(remainingSteps[i].id, { order_index: i });
+              }
+              
               await loadData();
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
             }
+          },
+        },
+      ]
+    );
+  };
+
+  const onRedefineArrival = (stepId: number, stepName: string) => {
+    Alert.alert(
+      'Redéfinir le point d\'arrivée',
+      `Voulez-vous redéfinir le lieu de "${stepName}" ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Redéfinir',
+          onPress: () => {
+            // TODO: Ouvrir un modal pour redéfinir le lieu
+            Alert.alert('Redéfinir lieu', 'Fonctionnalité à venir : redéfinir le lieu du point d\'arrivée');
           },
         },
       ]
@@ -208,6 +297,9 @@ export default function TripDetailsHero() {
       try {
         await addTripImage(id, result.assets[0].uri);
         await loadData();
+        // Revenir à la première image du carrousel
+        setCurrentImageIndex(0);
+        try { scrollViewRef.current?.scrollTo?.({ x: 0, y: 0, animated: false }); } catch {}
         Alert.alert('Succès', 'Image ajoutée au voyage');
       } catch (error) {
         console.error('Erreur lors de l\'ajout de l\'image:', error);
@@ -216,7 +308,7 @@ export default function TripDetailsHero() {
     }
   };
 
-  const onDeleteImage = async (imageId: number) => {
+  const onDeleteImage = async (imageId: number, imageUri?: string) => {
     Alert.alert(
       'Supprimer l\'image',
       'Êtes-vous sûr de vouloir supprimer cette image ?',
@@ -228,7 +320,14 @@ export default function TripDetailsHero() {
           onPress: async () => {
             try {
               await deleteTripImage(imageId);
+              if (imageUri) {
+                // Supprimer aussi l'image des étapes de ce voyage si elle est utilisée
+                await deleteStepImagesByUriForTrip(id, imageUri);
+              }
               await loadData();
+              // Revenir à la première image du carrousel
+              setCurrentImageIndex(0);
+              try { scrollViewRef.current?.scrollTo?.({ x: 0, y: 0, animated: false }); } catch {}
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
               Alert.alert('Erreur', 'Impossible de supprimer l\'image');
@@ -414,6 +513,9 @@ export default function TripDetailsHero() {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Composant interne pour afficher le nom du lieu par lat/lng */}
+      {/* Déclaré ici pour accéder à resolver via props */}
+      {null}
       {/* Fixed buttons - outside ScrollView */}
       <Pressable style={styles.backBtn} onPress={() => router.back()}>
         <Text style={styles.backIcon}>←</Text>
@@ -480,7 +582,7 @@ export default function TripDetailsHero() {
 
               return (
                 <Pressable
-                  key={index}
+                  key={(image as any)?.uri ? String((image as any).uri) : `img-${index}`}
                   onPress={() => onImagePress(index)}
                   style={{ flex: 1 }}
                 >
@@ -498,6 +600,17 @@ export default function TripDetailsHero() {
                       style={styles.hero}
                       imageStyle={styles.heroImg}
                     >
+                      {typeof image === 'object' && image !== null && ((image as any).__stepName || (image as any).__lat) ? (
+                        <View style={styles.heroLabel}>
+                          {(image as any).__stepName ? (
+                            <Text style={styles.heroLabelText}>{String((image as any).__stepName)}</Text>
+                          ) : (
+                            ((image as any).__lat && (image as any).__lng) ? (
+                              <PlaceName lat={(image as any).__lat} lng={(image as any).__lng} resolver={getPlaceLabel} />
+                            ) : null
+                          )}
+                        </View>
+                      ) : null}
                     </ImageBackground>
                   </Animated.View>
                 </Pressable>
@@ -508,9 +621,9 @@ export default function TripDetailsHero() {
           {/* Carousel dots - positioned over the image at bottom */}
           {images.length > 1 && (
             <View style={styles.carouselDots}>
-              {images.map((_, index) => (
+              {images.map((img, index) => (
                 <Pressable 
-                  key={index}
+                  key={(img as any)?.uri ? `dot-${String((img as any).uri)}` : `dot-${index}`}
                   style={[styles.dot, index === currentImageIndex && styles.dotActive]} 
                   onPress={() => goToImage(index)}
                 />
@@ -533,7 +646,7 @@ export default function TripDetailsHero() {
         </View>
         <View style={styles.titleRow}>
           <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
-          <Pressable style={styles.mapButton} onPress={() => router.push(`/trip/${id}/map`)}>
+          <Pressable style={styles.mapButton} onPress={goToMap}>
             <Text style={styles.mapButtonText}>🗺️ Carte</Text>
           </Pressable>
         </View>
@@ -543,50 +656,7 @@ export default function TripDetailsHero() {
         {!!dateRange && <Text style={styles.dates}>{dateRange}</Text>}
       </View>
 
-      {/* Steps Section */}
-      <View style={styles.stepsSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.section}>Étapes du voyage</Text>
-          <Pressable style={styles.manageButton} onPress={() => router.push(`/trip/${id}/map?addStep=true`)}>
-            <Text style={styles.manageButtonText}>Gérer</Text>
-          </Pressable>
-        </View>
-        
-        {steps.length > 0 ? (
-          <View style={styles.stepsList}>
-            {steps.map((step, index) => (
-              <View key={step.id} style={styles.stepItem}>
-                <View style={styles.stepNumber}>
-                  <Text style={styles.stepNumberText}>{index + 1}</Text>
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={styles.stepName}>{step.name}</Text>
-                  {step.description && (
-                    <Text style={styles.stepDescription}>{step.description}</Text>
-                  )}
-                  <View style={styles.stepCoordsContainer}>
-                    <LocationIcon size={12} color={colors.keppelDark} />
-                    <Text style={styles.stepCoords}>
-                      {step.latitude.toFixed(4)}, {step.longitude.toFixed(4)}
-                    </Text>
-                  </View>
-                </View>
-                <Pressable 
-                  style={styles.deleteStepButton}
-                  onPress={() => onDeleteStep(step.id, step.name)}
-                >
-                  <Text style={styles.deleteStepIcon}>🗑️</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.emptySteps}>
-            <Text style={styles.emptyStepsText}>Aucune étape ajoutée</Text>
-            <Text style={styles.emptyStepsSubtext}>Commencez par ajouter votre première étape</Text>
-          </View>
-        )}
-      </View>
+      {/* Steps Section removed: gestion des étapes depuis la carte */}
 
       {/* Participants Section */}
       <View style={styles.participantsSection}>
@@ -640,30 +710,7 @@ export default function TripDetailsHero() {
         </View>
       </View>
 
-      <View style={styles.notesSection}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.section}>Bloc note de voyages</Text>
-          <Pressable style={styles.manageButton} onPress={() => router.push(`/trip/${id}/journal`)}>
-            <Text style={styles.manageButtonText}>Gérer</Text>
-          </Pressable>
-        </View>
-        
-        {steps.slice(0, 4).map((s, index) => (
-          <Pressable key={s.id} style={styles.noteCard}>
-            <Image source={images[index % images.length]} style={styles.noteThumb} />
-            <View style={styles.noteContent}>
-              <Text style={styles.noteTitle}>Visite du musée du pont</Text>
-              <View style={styles.noteMetaRow}>
-                <Text style={styles.calendarIcon}>📅</Text>
-                <Text style={styles.noteMeta}>Modifié le 10/10/2025</Text>
-              </View>
-            </View>
-            <Pressable style={styles.chev}>
-              <Text style={styles.chevTxt}>›</Text>
-            </Pressable>
-          </Pressable>
-        ))}
-        </View>
+      {/* Bloc note de voyages supprimé sur demande */}
 
         {/* Checklist Section */}
         <View style={styles.checklistSection}>
@@ -858,7 +905,7 @@ export default function TripDetailsHero() {
                       <View style={styles.imageLibraryActions}>
                         <Pressable 
                           style={styles.imageLibraryActionButton}
-                          onPress={() => onDeleteImage(img.id)}
+                          onPress={() => onDeleteImage(img.id, img.image_uri)}
                         >
                           <Text style={styles.imageLibraryActionText}>✕</Text>
                         </Pressable>
@@ -1042,7 +1089,7 @@ export default function TripDetailsHero() {
             }}
           >
             {images.map((image, index) => (
-              <View key={index} style={styles.imageModalItem}>
+              <View key={(image as any)?.uri ? `fs-${String((image as any).uri)}` : `fs-${index}`} style={styles.imageModalItem}>
                 <Image 
                   source={image} 
                   style={styles.imageModalImage}
@@ -1063,6 +1110,22 @@ export default function TripDetailsHero() {
       </Modal>
     </SafeAreaView>
   );
+}
+
+// Petit composant pour afficher un nom de lieu à partir de lat/lng, avec cache via resolver
+function PlaceName({ lat, lng, resolver }: { lat: number; lng: number; resolver: (lat?: number, lng?: number) => Promise<string | null> }) {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    let mounted = true;
+    resolver(lat, lng).then((res) => {
+      if (mounted) setLabel(res);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [lat, lng, resolver]);
+  if (!label) return null;
+  return <Text style={styles.heroLabelText}>{label}</Text>;
 }
 
 const styles = StyleSheet.create({
@@ -1095,6 +1158,19 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 0 // Pas de borderRadius sur l'image, c'est le container qui gère ça
+  },
+  heroLabel: {
+    position: 'absolute',
+    bottom: 40,
+    left: 12,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  heroLabelText: {
+    color: 'white',
+    fontWeight: '800',
   },
   backBtn: { 
     position: 'absolute', 
@@ -1330,6 +1406,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     marginTop: 24,
   },
+  // Styles des notes supprimés car la section est retirée
   section: { 
     fontSize: 20, 
     fontWeight: '900', 
@@ -1826,6 +1903,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
+  stepDate: {
+    fontSize: 12,
+    color: colors.textSecondary,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
+  stepActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  stepClickHint: {
+    fontSize: 16,
+    opacity: 0.6,
+  },
+  redefineButton: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  redefineButtonText: {
+    fontSize: 16,
+  },
   // Unified manage button style
   manageButton: {
     backgroundColor: colors.white,
@@ -1851,20 +1952,24 @@ const styles = StyleSheet.create({
   },
   mapButton: {
     backgroundColor: colors.keppel,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     shadowColor: colors.keppel,
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   mapButtonText: {
     color: colors.white,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   // Participants styles
   participantsSection: {

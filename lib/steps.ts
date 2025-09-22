@@ -12,6 +12,14 @@ export type Step = {
 	order_index?: number | null;
 };
 
+export type StepImage = {
+  id: number;
+  step_id: number;
+  image_uri: string;
+  order_index: number;
+  created_at: number;
+};
+
 export async function listSteps(tripId: number): Promise<Step[]> {
 	const db = await getDatabase();
 	return await queryAsync<Step>(
@@ -20,6 +28,19 @@ export async function listSteps(tripId: number): Promise<Step[]> {
 		 FROM steps WHERE trip_id = ? ORDER BY COALESCE(order_index, 0), start_date ASC, id ASC`,
 		[tripId]
 	);
+}
+
+export async function getStep(stepId: number): Promise<Step> {
+	const db = await getDatabase();
+	const rows = await queryAsync<Step>(
+		db,
+		`SELECT * FROM steps WHERE id = ?`,
+		[stepId]
+	);
+	if (rows.length === 0) {
+		throw new Error('Étape non trouvée');
+	}
+	return rows[0];
 }
 
 export async function createStep(step: Omit<Step, 'id'>): Promise<number> {
@@ -56,6 +77,78 @@ export async function updateStep(stepId: number, updates: Partial<Omit<Step, 'id
 export async function deleteStep(stepId: number): Promise<void> {
 	const db = await getDatabase();
 	await executeAsync(db, 'DELETE FROM steps WHERE id = ?', [stepId]);
+}
+
+// Récupère toutes les images d'étapes d'un voyage avec le nom de l'étape
+export async function getTripStepImagesWithSteps(tripId: number): Promise<Array<{ image_uri: string; step_id: number; step_name: string; latitude: number; longitude: number }>> {
+  const db = await getDatabase();
+  const rows = await queryAsync<{ image_uri: string; step_id: number; step_name: string; latitude: number; longitude: number }>(
+    db,
+    `SELECT si.image_uri as image_uri, si.step_id as step_id, s.name as step_name, s.latitude as latitude, s.longitude as longitude
+     FROM step_images si
+     JOIN steps s ON s.id = si.step_id
+     WHERE s.trip_id = ?
+     ORDER BY si.created_at ASC` ,
+    [tripId]
+  );
+  return rows;
+}
+
+
+// Images par étape
+export async function addStepImage(stepId: number, imageUri: string): Promise<number> {
+  const db = await getDatabase();
+  // Calculer le prochain order_index pour append à la fin des images de cette étape
+  const rowsMax = await queryAsync<{ maxIndex: number | null }>(
+    db,
+    'SELECT MAX(order_index) as maxIndex FROM step_images WHERE step_id = ?',
+    [stepId]
+  );
+  const nextIndex = (rowsMax[0]?.maxIndex ?? -1) + 1;
+  await executeAsync(
+    db,
+    'INSERT INTO step_images (step_id, image_uri, order_index, created_at) VALUES (?, ?, ?, ?)',
+    [stepId, imageUri, nextIndex, Date.now()]
+  );
+  const rows = await queryAsync<{ id: number }>(db, 'SELECT last_insert_rowid() as id');
+  return rows[0]?.id;
+}
+
+export async function getStepImages(stepId: number): Promise<StepImage[]> {
+  const db = await getDatabase();
+  return await queryAsync<StepImage>(
+    db,
+    'SELECT * FROM step_images WHERE step_id = ? ORDER BY order_index ASC, created_at ASC',
+    [stepId]
+  );
+}
+
+export async function deleteStepImage(imageId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(db, 'DELETE FROM step_images WHERE id = ?', [imageId]);
+}
+
+export async function updateStepImageOrder(imageId: number, newOrder: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(db, 'UPDATE step_images SET order_index = ? WHERE id = ?', [newOrder, imageId]);
+}
+
+
+// Supprime toutes les images d'étapes d'un voyage données une URI
+export async function deleteStepImagesByUriForTrip(tripId: number, imageUri: string): Promise<void> {
+  if (!imageUri) return;
+  const db = await getDatabase();
+  // Supprimer via sous-requête pour cibler uniquement les steps du trip
+  await executeAsync(
+    db,
+    `DELETE FROM step_images 
+     WHERE id IN (
+       SELECT si.id FROM step_images si
+       JOIN steps s ON s.id = si.step_id
+       WHERE s.trip_id = ? AND si.image_uri = ?
+     )`,
+    [tripId, imageUri]
+  );
 }
 
 

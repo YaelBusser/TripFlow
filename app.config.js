@@ -30,7 +30,12 @@ export default {
       },
       package: "com.tripflow.app",
       edgeToEdgeEnabled: true,
-      predictiveBackGestureEnabled: false
+      predictiveBackGestureEnabled: false,
+      permissions: [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
     },
     web: {
       output: "static",
@@ -51,7 +56,17 @@ export default {
           }
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-location",
+        {
+          locationAlwaysAndWhenInUsePermission: "Cette application a besoin d'accéder à votre localisation pour afficher votre position sur la carte.",
+          locationAlwaysPermission: "Cette application a besoin d'accéder à votre localisation en arrière-plan pour suivre vos déplacements.",
+          locationWhenInUsePermission: "Cette application a besoin d'accéder à votre localisation pour afficher votre position sur la carte.",
+          isAndroidBackgroundLocationEnabled: true,
+          isAndroidForegroundServiceEnabled: true
+        }
+      ]
     ],
     experiments: {
       typedRoutes: true,

@@ -27,32 +27,50 @@ export default function DestinationMapSelector({ onDestinationSelected, onCancel
   const mapRef = useRef<any>(null);
 
   useEffect(() => {
-    // Get current location
+    // Get current location automatiquement
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
+          const location = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+            maximumAge: 10000, // 10 secondes
+            timeout: 15000 // 15 secondes
+          });
           const currentLoc = {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude
           };
           setCurrentLocation(currentLoc);
           
-          // Zoom sur la position actuelle après un court délai
-          setTimeout(() => {
-            if (mapRef.current) {
+          // Zoom automatiquement sur la position actuelle
+          if (mapRef.current) {
+            setTimeout(() => {
               mapRef.current.animateToRegion({
                 latitude: currentLoc.latitude,
                 longitude: currentLoc.longitude,
                 latitudeDelta: 0.01,
                 longitudeDelta: 0.01
               }, 1000);
-            }
-          }, 500);
+            }, 500);
+          }
+        } else {
+          console.log('Permission de localisation refusée');
         }
       } catch (error) {
-        console.log('Location permission denied or error:', error);
+        console.log('Erreur de localisation:', error);
+        // En cas d'erreur, centrer sur Paris par défaut
+        const defaultLocation = { latitude: 48.8566, longitude: 2.3522 };
+        setCurrentLocation(defaultLocation);
+        if (mapRef.current) {
+          setTimeout(() => {
+            mapRef.current.animateToRegion({
+              ...defaultLocation,
+              latitudeDelta: 0.1,
+              longitudeDelta: 0.1
+            }, 1000);
+          }, 500);
+        }
       }
     })();
   }, []);
@@ -184,7 +202,7 @@ export default function DestinationMapSelector({ onDestinationSelected, onCancel
           style={StyleSheet.absoluteFill}
           initialRegion={region}
           mapType={Platform.OS === 'ios' ? 'hybrid' : 'terrain'}
-          onPress={handleMapPress}
+          onLongPress={handleMapPress}
         >
           {currentLocation && (
             <Marker 

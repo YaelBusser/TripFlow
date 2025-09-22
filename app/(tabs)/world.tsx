@@ -31,18 +31,24 @@ export default function WorldMapScreen() {
             const s = await listSteps(latest.id);
             setSteps(s);
             
-            // Get current location
+            // Get current location automatiquement
             try {
                 const { status } = await Location.requestForegroundPermissionsAsync();
                 if (status === 'granted') {
-                    const location = await Location.getCurrentPositionAsync({});
+                    const location = await Location.getCurrentPositionAsync({
+                        accuracy: Location.Accuracy.High,
+                        maximumAge: 10000, // 10 secondes
+                        timeout: 15000 // 15 secondes
+                    });
                     setCurrentLocation({
                         latitude: location.coords.latitude,
                         longitude: location.coords.longitude
                     });
+                } else {
+                    console.log('Permission de localisation refusée');
                 }
             } catch (error) {
-                console.log('Location permission denied or error:', error);
+                console.log('Erreur de localisation:', error);
             }
         })();
     }, []);
@@ -76,8 +82,26 @@ export default function WorldMapScreen() {
 						pinColor="blue"
 					/>
 				)}
-				{steps.length > 1 && (
-					<Polyline coordinates={steps.map(s => ({ latitude: s.latitude, longitude: s.longitude }))} strokeWidth={4} strokeColor="#10b981" />
+				{/* Ligne pointillée entre position actuelle et première étape */}
+				{currentLocation && steps.length > 0 && (
+					<Polyline 
+						coordinates={[
+							currentLocation, 
+							{ latitude: steps[0].latitude, longitude: steps[0].longitude }
+						]} 
+						strokeColor="#3b82f6" 
+						strokeWidth={3}
+						strokePattern={[10, 5]} // Ligne pointillée bleue
+					/>
+				)}
+				
+				{/* Lignes reliant les étapes entre elles */}
+				{steps.length > 0 && (
+					<Polyline 
+						coordinates={steps.map(s => ({ latitude: s.latitude, longitude: s.longitude }))} 
+						strokeWidth={4} 
+						strokeColor="#10b981" 
+					/>
 				)}
 			</MapView>
 		</SafeAreaView>
