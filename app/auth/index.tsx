@@ -2,11 +2,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Image, ImageBackground, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useTheme } from '../../contexts/ThemeContext';
 import { login, signUp } from '../../lib/auth';
-import { colors } from '../../lib/colors';
 import { setCurrentUser } from '../../lib/session';
 
 export default function AuthScreen() {
+	const { themeColors } = useTheme();
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirmPassword, setConfirmPassword] = useState('');
@@ -80,7 +81,9 @@ export default function AuthScreen() {
 		try {
 			setLoading(true);
 			const action = mode === 'login' ? login : signUp;
-			const user = await action(email, password);
+			const user = mode === 'login' 
+				? await action(email, password)
+				: await action(email, password, name);
 			await setCurrentUser(user.id);
 			router.replace('/');
 		} catch (e: any) {
@@ -90,34 +93,146 @@ export default function AuthScreen() {
 		}
 	}
 
+	const dynamicStyles = StyleSheet.create({
+		container: {
+			flex: 1,
+		},
+		keyboardContainer: {
+			flex: 1,
+			backgroundColor: 'rgba(47, 182, 161, 0.9)', // Keppel avec transparence
+		},
+		scrollContainer: {
+			flexGrow: 1,
+			justifyContent: 'center',
+			padding: 24,
+		},
+		logoContainer: {
+			alignItems: 'center',
+			marginBottom: 16,
+		},
+		logo: {
+			width: 80,
+			height: 80,
+			borderRadius: 40,
+			marginBottom: 12,
+			shadowColor: themeColors.shadowMedium,
+			shadowOpacity: 1,
+			shadowRadius: 8,
+			shadowOffset: { width: 0, height: 4 },
+			elevation: 4,
+		},
+		title: {
+			fontSize: 42,
+			fontWeight: '900',
+			color: themeColors.backgroundPrimary,
+			textAlign: 'center',
+			marginBottom: 8,
+			letterSpacing: -1,
+		},
+		subtitle: {
+			fontSize: 16,
+			color: '#F8F1DD', // eggshell color
+			textAlign: 'center',
+			marginBottom: 32,
+			fontWeight: '500',
+		},
+		card: {
+			width: '100%',
+			backgroundColor: themeColors.backgroundPrimary,
+			borderRadius: 20,
+			padding: 24,
+			shadowColor: themeColors.shadowDark,
+			shadowOpacity: 1,
+			shadowRadius: 20,
+			shadowOffset: { width: 0, height: 10 },
+			elevation: 8,
+		},
+		cardTitle: {
+			fontSize: 24,
+			fontWeight: '800',
+			marginBottom: 20,
+			textAlign: 'center',
+			color: themeColors.textPrimary,
+		},
+		input: {
+			borderWidth: 2,
+			borderColor: themeColors.borderLight,
+			borderRadius: 12,
+			paddingHorizontal: 16,
+			paddingVertical: 14,
+			marginBottom: 8,
+			fontSize: 16,
+			backgroundColor: themeColors.backgroundSecondary,
+			color: themeColors.textPrimary,
+		},
+		inputError: {
+			borderColor: themeColors.error,
+			backgroundColor: '#fef2f2',
+		},
+		errorText: {
+			color: themeColors.error,
+			fontSize: 14,
+			marginBottom: 12,
+			fontWeight: '600',
+		},
+		button: {
+			backgroundColor: themeColors.primary,
+			borderRadius: 12,
+			paddingVertical: 16,
+			alignItems: 'center',
+			marginTop: 8,
+			shadowColor: themeColors.primary,
+			shadowOpacity: 0.3,
+			shadowRadius: 8,
+			shadowOffset: { width: 0, height: 4 },
+			elevation: 4,
+		},
+		buttonText: {
+			color: themeColors.backgroundPrimary,
+			fontWeight: '800',
+			fontSize: 16,
+		},
+		switchButton: {
+			marginTop: 16,
+			paddingVertical: 8,
+		},
+		switchText: {
+			textAlign: 'center',
+			color: themeColors.secondary,
+			fontWeight: '700',
+			fontSize: 16,
+		},
+	});
+
 	return (
 		<ImageBackground 
 			source={require('../../assets/images/splash-screen.png')} 
-			style={styles.container}
+			style={dynamicStyles.container}
 			resizeMode="cover"
 		>
 			<KeyboardAvoidingView 
-				style={styles.keyboardContainer} 
+				style={dynamicStyles.keyboardContainer} 
 				behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
 			>
-				<ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
-					<View style={styles.logoContainer}>
+				<ScrollView contentContainerStyle={dynamicStyles.scrollContainer} showsVerticalScrollIndicator={false}>
+					<View style={dynamicStyles.logoContainer}>
 						<Image 
 							source={require('../../assets/images/icon.png')} 
-							style={styles.logo}
+							style={dynamicStyles.logo}
 						/>
-						<Text style={styles.title}>TripFlow</Text>
+						<Text style={dynamicStyles.title}>TripFlow</Text>
 					</View>
-					<Text style={styles.subtitle}>Organisez vos voyages en toute simplicité</Text>
+					<Text style={dynamicStyles.subtitle}>Organisez vos voyages en toute simplicité</Text>
 				
-				<View style={styles.card}>
-					<Text style={styles.cardTitle}>{mode === 'login' ? 'Connexion' : 'Inscription'}</Text>
+				<View style={dynamicStyles.card}>
+					<Text style={dynamicStyles.cardTitle}>{mode === 'login' ? 'Connexion' : 'Inscription'}</Text>
 					
 					{mode === 'signup' && (
 						<>
 							<TextInput
-								style={[styles.input, errors.name && styles.inputError]}
+								style={[dynamicStyles.input, errors.name && dynamicStyles.inputError]}
 								placeholder="Nom complet"
+								placeholderTextColor={themeColors.textTertiary}
 								value={name}
 								onChangeText={(text) => {
 									setName(text);
@@ -125,13 +240,14 @@ export default function AuthScreen() {
 								}}
 								autoCapitalize="words"
 							/>
-							{errors.name && <Text style={styles.errorText}>{errors.name}</Text>}
+							{errors.name && <Text style={dynamicStyles.errorText}>{errors.name}</Text>}
 						</>
 					)}
 
 					<TextInput
-						style={[styles.input, errors.email && styles.inputError]}
+						style={[dynamicStyles.input, errors.email && dynamicStyles.inputError]}
 						placeholder="Email"
+						placeholderTextColor={themeColors.textTertiary}
 						keyboardType="email-address"
 						autoCapitalize="none"
 						value={email}
@@ -140,12 +256,13 @@ export default function AuthScreen() {
 							if (errors.email) setErrors(prev => ({ ...prev, email: '' }));
 						}}
 					/>
-					{errors.email && <Text style={styles.errorText}>{errors.email}</Text>}
+					{errors.email && <Text style={dynamicStyles.errorText}>{errors.email}</Text>}
 
 					<View style={styles.passwordContainer}>
 						<TextInput
-							style={[styles.input, styles.passwordInput, errors.password && styles.inputError]}
+							style={[dynamicStyles.input, styles.passwordInput, errors.password && dynamicStyles.inputError]}
 							placeholder="Mot de passe"
+							placeholderTextColor={themeColors.textTertiary}
 							secureTextEntry={!showPassword}
 							value={password}
 							onChangeText={(text) => {
@@ -164,13 +281,13 @@ export default function AuthScreen() {
 							/>
 						</Pressable>
 					</View>
-					{errors.password && <Text style={styles.errorText}>{errors.password}</Text>}
+					{errors.password && <Text style={dynamicStyles.errorText}>{errors.password}</Text>}
 
 					{mode === 'signup' && (
 						<>
 							<View style={styles.passwordContainer}>
 								<TextInput
-									style={[styles.input, styles.passwordInput, errors.confirmPassword && styles.inputError]}
+									style={[dynamicStyles.input, styles.passwordInput, errors.confirmPassword && dynamicStyles.inputError]}
 									placeholder="Confirmer le mot de passe"
 									secureTextEntry={!showConfirmPassword}
 									value={confirmPassword}
@@ -190,16 +307,16 @@ export default function AuthScreen() {
 									/>
 								</Pressable>
 							</View>
-							{errors.confirmPassword && <Text style={styles.errorText}>{errors.confirmPassword}</Text>}
+							{errors.confirmPassword && <Text style={dynamicStyles.errorText}>{errors.confirmPassword}</Text>}
 						</>
 					)}
 
 					<Pressable 
-						style={[styles.button, loading && { opacity: 0.7 }]} 
+						style={[dynamicStyles.button, loading && { opacity: 0.7 }]} 
 						disabled={loading} 
 						onPress={onSubmit}
 					>
-						<Text style={styles.buttonText}>
+						<Text style={dynamicStyles.buttonText}>
 							{loading ? 'Chargement...' : (mode === 'login' ? 'Se connecter' : "S'inscrire")}
 						</Text>
 					</Pressable>
@@ -213,9 +330,9 @@ export default function AuthScreen() {
 							setShowPassword(false);
 							setShowConfirmPassword(false);
 						}}
-						style={styles.switchButton}
+						style={dynamicStyles.switchButton}
 					>
-						<Text style={styles.switchText}>
+						<Text style={dynamicStyles.switchText}>
 							{mode === 'login' ? "Pas de compte ? Inscrivez-vous" : 'Déjà un compte ? Connectez-vous'}
 						</Text>
 					</Pressable>
@@ -227,76 +344,6 @@ export default function AuthScreen() {
 }
 
 const styles = StyleSheet.create({
-	container: {
-		flex: 1,
-	},
-	keyboardContainer: {
-		flex: 1,
-		backgroundColor: 'rgba(47, 182, 161, 0.9)', // Keppel avec transparence
-	},
-	scrollContainer: {
-		flexGrow: 1,
-		justifyContent: 'center',
-		padding: 24,
-	},
-	logoContainer: {
-		alignItems: 'center',
-		marginBottom: 16,
-	},
-	logo: {
-		width: 80,
-		height: 80,
-		borderRadius: 40,
-		marginBottom: 12,
-		shadowColor: colors.shadowMedium,
-		shadowOpacity: 1,
-		shadowRadius: 8,
-		shadowOffset: { width: 0, height: 4 },
-		elevation: 4,
-	},
-	title: {
-		fontSize: 42,
-		fontWeight: '900',
-		color: colors.white,
-		textAlign: 'center',
-		marginBottom: 8,
-		letterSpacing: -1,
-	},
-	subtitle: {
-		fontSize: 16,
-		color: colors.eggshell,
-		textAlign: 'center',
-		marginBottom: 32,
-		fontWeight: '500',
-	},
-	card: {
-		width: '100%',
-		backgroundColor: colors.white,
-		borderRadius: 20,
-		padding: 24,
-		shadowColor: colors.shadowDark,
-		shadowOpacity: 1,
-		shadowRadius: 20,
-		shadowOffset: { width: 0, height: 10 },
-		elevation: 8,
-	},
-	cardTitle: {
-		fontSize: 24,
-		fontWeight: '800',
-		marginBottom: 20,
-		textAlign: 'center',
-		color: colors.textPrimary,
-	},
-	input: {
-		borderWidth: 2,
-		borderColor: colors.borderLight,
-		borderRadius: 12,
-		paddingHorizontal: 16,
-		paddingVertical: 14,
-		marginBottom: 8,
-		fontSize: 16,
-		backgroundColor: colors.backgroundSecondary,
-	},
 	passwordContainer: {
 		position: 'relative',
 		marginBottom: 8,
@@ -310,43 +357,6 @@ const styles = StyleSheet.create({
 		right: 16,
 		top: 14,
 		padding: 4,
-	},
-	inputError: {
-		borderColor: colors.error,
-		backgroundColor: '#fef2f2',
-	},
-	errorText: {
-		color: colors.error,
-		fontSize: 14,
-		marginBottom: 12,
-		fontWeight: '600',
-	},
-	button: {
-		backgroundColor: colors.keppel,
-		borderRadius: 12,
-		paddingVertical: 16,
-		alignItems: 'center',
-		marginTop: 8,
-		shadowColor: colors.keppel,
-		shadowOpacity: 0.3,
-		shadowRadius: 8,
-		shadowOffset: { width: 0, height: 4 },
-		elevation: 4,
-	},
-	buttonText: {
-		color: colors.white,
-		fontWeight: '800',
-		fontSize: 16,
-	},
-	switchButton: {
-		marginTop: 16,
-		paddingVertical: 8,
-	},
-	switchText: {
-		textAlign: 'center',
-		color: colors.cambridgeBlue,
-		fontWeight: '700',
-		fontSize: 16,
 	},
 });
 

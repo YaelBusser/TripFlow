@@ -12,7 +12,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 			const sessionData = JSON.parse(storedSession);
 			if (sessionData.userId) {
 				const db = await getDatabase();
-				const users = await queryAsync<AuthUser>(db, 'SELECT id, email FROM users WHERE id = ?', [sessionData.userId]);
+				const users = await queryAsync<AuthUser>(db, 'SELECT id, email, name, profile_photo_uri FROM users WHERE id = ?', [sessionData.userId]);
 				if (users[0]) {
 					// Synchroniser avec la base de données
 					await setCurrentUser(sessionData.userId);
@@ -25,7 +25,7 @@ export async function getCurrentUser(): Promise<AuthUser | null> {
 		const db = await getDatabase();
 		const s = await queryAsync<{ current_user_id: number }>(db, 'SELECT current_user_id FROM session LIMIT 1');
 		if (s.length === 0 || s[0].current_user_id == null) return null;
-		const users = await queryAsync<AuthUser>(db, 'SELECT id, email FROM users WHERE id = ?', [s[0].current_user_id]);
+		const users = await queryAsync<AuthUser>(db, 'SELECT id, email, name, profile_photo_uri FROM users WHERE id = ?', [s[0].current_user_id]);
 		return users[0] ?? null;
 	} catch (error) {
 		console.error('Erreur lors de la récupération de la session:', error);

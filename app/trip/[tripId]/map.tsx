@@ -30,7 +30,7 @@ try {
 }
 
 export default function TripMapScreen() {
-    const { tripId, addStep, focusLat, focusLng } = useLocalSearchParams<{ tripId: string; addStep?: string; focusLat?: string; focusLng?: string }>();
+	const { tripId, addStep, focusLat, focusLng } = useLocalSearchParams<{ tripId: string; addStep?: string; focusLat?: string; focusLng?: string }>();
 	const id = Number(tripId);
 	const [steps, setSteps] = useState<Step[]>([]);
 	const [selectedLocation, setSelectedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -49,14 +49,19 @@ export default function TripMapScreen() {
 	const [modalStep, setModalStep] = useState<Step | null>(null);
 	const [modalDescription, setModalDescription] = useState('');
 	const [blockedIndex, setBlockedIndex] = useState<number | null>(null);
-	const sortedSteps = useMemo(() => [...steps].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)), [steps]);
+	const [adventureStarted, setAdventureStarted] = useState(false);
+	const sortedSteps = useMemo(() => {
+		return [...steps].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+	}, [steps]);
 	const [draggedStep, setDraggedStep] = useState<Step | null>(null);
 	const [showLegend, setShowLegend] = useState(false);
-	const [adventureStarted, setAdventureStarted] = useState(false);
 	const mapRef = useRef<any>(null);
+	const startingStepCreatedRef = useRef(false);
 
-    const loadSteps = useCallback(async () => {
+	const loadSteps = useCallback(async () => {
 		if (!id) return;
+		// Réinitialiser le ref pour le nouveau voyage
+		startingStepCreatedRef.current = false;
 		const data = await listSteps(id);
 		// Ordonner les étapes par order_index (ordre d'ajout)
 		const sortedSteps = data.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
@@ -64,54 +69,66 @@ export default function TripMapScreen() {
 
 		// Étapes chargées (log supprimé pour éviter le spam)
 
-        // Ne plus déduire adventureStarted de la présence du point de départ
+		// Ne plus déduire adventureStarted de la présence du point de départ
 
-        // La destination finale: si aucune étape en base, on utilise la destination du trip si existante; sinon null
-        if (sortedSteps.length > 0) {
-            const lastStep = sortedSteps[sortedSteps.length - 1];
-            setFinalDestination({
-                latitude: lastStep.latitude,
-                longitude: lastStep.longitude,
-                name: lastStep.name
-            });
-        } else {
-            setFinalDestination(null);
-        }
+		// La destination finale: si aucune étape en base, on utilise la destination du trip si existante; sinon null
+		if (sortedSteps.length > 0) {
+			const lastStep = sortedSteps[sortedSteps.length - 1];
+			setFinalDestination({
+				latitude: lastStep.latitude,
+				longitude: lastStep.longitude,
+				name: lastStep.name
+			});
+		} else {
+			setFinalDestination(null);
+		}
 	}, [id]);
 
-    // Créer un point de départ provisoire (position actuelle) s'il n'existe pas encore
-    const ensureStartingStep = useCallback(async () => {
-        if (!id || !currentLocation) return;
-        const existing = await listSteps(id);
-        const hasStart = existing.some(s => s.name === 'Point de départ');
-        if (!hasStart) {
-            // Décaler toutes les étapes existantes de +1 pour libérer l'index 0
-            const ordered = existing.sort((a,b) => (a.order_index||0)-(b.order_index||0));
-            for (let i = 0; i < ordered.length; i++) {
-                await updateStep(ordered[i].id, { order_index: (ordered[i].order_index || 0) + 1 });
-            }
-            // Créer l'étape de départ en 0
-            await createStep({
-                trip_id: id,
-                name: 'Point de départ',
-                latitude: currentLocation.latitude,
-                longitude: currentLocation.longitude,
-                start_date: new Date().getTime(),
-                end_date: null,
-                description: 'Point de départ (temporaire)',
-                order_index: 0,
-            });
-            const refreshed = await listSteps(id);
-            setSteps(refreshed.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)));
-        }
-    }, [id, currentLocation]);
+	// Créer un point de départ automatiquement s'il n'existe pas encore
+	const ensureStartingStep = useCallback(async () => {
+		if (!id || !currentLocation || startingStepCreatedRef.current) return;
+
+		console.log('Vérification du point de départ...');
+		startingStepCreatedRef.current = true; // Marquer immédiatement pour éviter les doublons
+
+		const existing = await listSteps(id);
+		const hasStart = existing.some(s => s.name === 'Point de départ');
+		if (!hasStart) {
+			console.log('Création du point de départ automatique...');
+
+			// Décaler toutes les étapes existantes de +1 pour libérer l'index 0
+			const ordered = existing.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+			for (let i = 0; i < ordered.length; i++) {
+				await updateStep(ordered[i].id, { order_index: (ordered[i].order_index || 0) + 1 });
+			}
+			// Créer l'étape de départ en 0
+			await createStep({
+				trip_id: id,
+				name: 'Point de départ',
+				latitude: currentLocation.latitude,
+				longitude: currentLocation.longitude,
+				start_date: new Date().getTime(),
+				end_date: null,
+				description: 'Point de départ (temporaire)',
+				order_index: 0,
+			});
+			console.log('Point de départ créé, rechargement des étapes...');
+			// Recharger les étapes et forcer la mise à jour
+			const refreshed = await listSteps(id);
+			const sortedRefreshed = refreshed.sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+			setSteps(sortedRefreshed);
+			console.log('Étapes rechargées:', sortedRefreshed);
+		} else {
+			console.log('Point de départ déjà présent en base');
+		}
+	}, [id, currentLocation]);
 
 	/* start adventure handled by explicit button */
 
 	const hasAutoCenteredRef = useRef(false);
 
-    useEffect(() => {
-        (async () => {
+	useEffect(() => {
+		(async () => {
 			await loadSteps();
 			// Charger l'état adventure_started depuis le voyage pour persister le bouton
 			try {
@@ -119,37 +136,24 @@ export default function TripMapScreen() {
 				if (trip && typeof trip.adventure_started !== 'undefined' && trip.adventure_started !== null) {
 					setAdventureStarted(!!trip.adventure_started);
 				}
-			} catch {}
+			} catch { }
 
 			// Get current location automatiquement
 			try {
 				const { status } = await Location.requestForegroundPermissionsAsync();
 				if (status === 'granted') {
 					const location = await Location.getCurrentPositionAsync({
-						accuracy: Location.Accuracy.High,
-						maximumAge: 10000, // 10 secondes
-						timeout: 15000 // 15 secondes
+						accuracy: Location.Accuracy.High
 					});
 					const newLocation = {
 						latitude: location.coords.latitude,
 						longitude: location.coords.longitude
 					};
-                    setCurrentLocation(newLocation);
-                    // Assurer la présence d'un point de départ temporaire si aucune étape
-                    await ensureStartingStep();
+					setCurrentLocation(newLocation);
+					// Le point de départ sera créé par le useEffect séparé
 
-                    // Ne centrer automatiquement qu'une seule fois au premier rendu,
-                    // et seulement si on n'a pas de focusLat/focusLng demandé
-                    if (mapRef.current && !hasAutoCenteredRef.current && !(typeof focusLat === 'string' && typeof focusLng === 'string')) {
-						hasAutoCenteredRef.current = true;
-						setTimeout(() => {
-							mapRef.current?.animateToRegion({
-								...newLocation,
-								latitudeDelta: 0.01,
-								longitudeDelta: 0.01,
-							}, 1000);
-						}, 500);
-					}
+					// Ne plus centrer automatiquement sur la position actuelle
+					// La région initiale est calculée pour montrer l'ensemble du voyage
 				} else {
 					console.log('Permission de localisation refusée');
 				}
@@ -157,78 +161,86 @@ export default function TripMapScreen() {
 				console.log('Erreur de localisation:', error);
 			}
 		})();
-    }, [loadSteps]);
+	}, [loadSteps]);
 
-    // Si on vient avec des coordonnées à centrer depuis la page d'une étape
-    useEffect(() => {
-        if (!mapRef.current) return;
-        if (typeof focusLat === 'string' && typeof focusLng === 'string') {
-            const lat = parseFloat(focusLat);
-            const lng = parseFloat(focusLng);
-            if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
-                setTimeout(() => {
-                    mapRef.current?.animateToRegion({
-                        latitude: lat,
-                        longitude: lng,
-                        latitudeDelta: 0.01,
-                        longitudeDelta: 0.01,
-                    }, 800);
-                }, 300);
-            }
-        }
-    }, [focusLat, focusLng]);
+	// S'assurer que le point de départ est créé quand on a la localisation
+	useEffect(() => {
+		if (currentLocation && id && !startingStepCreatedRef.current) {
+			console.log('Déclenchement de ensureStartingStep depuis useEffect');
+			ensureStartingStep();
+		}
+	}, [currentLocation, id]);
 
-    // Suivi de la position: mettre à jour le point de départ tant que l'aventure n'est pas démarrée
-    useEffect(() => {
-        let subscription: any = null;
-        const THRESHOLD_METERS = 75; // seuil de mouvement pour MAJ du départ
+	// Si on vient avec des coordonnées à centrer depuis la page d'une étape
+	useEffect(() => {
+		if (!mapRef.current) return;
+		if (typeof focusLat === 'string' && typeof focusLng === 'string') {
+			const lat = parseFloat(focusLat);
+			const lng = parseFloat(focusLng);
+			if (!Number.isNaN(lat) && !Number.isNaN(lng)) {
+				setTimeout(() => {
+					mapRef.current?.animateToRegion({
+						latitude: lat,
+						longitude: lng,
+						latitudeDelta: 0.01,
+						longitudeDelta: 0.01,
+					}, 800);
+				}, 300);
+			}
+		}
+	}, [focusLat, focusLng]);
 
-        const toRad = (v: number) => (v * Math.PI) / 180;
-        const getDistanceMeters = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) => {
-            const R = 6371000; // Terre en m
-            const dLat = toRad(b.latitude - a.latitude);
-            const dLon = toRad(b.longitude - a.longitude);
-            const lat1 = toRad(a.latitude);
-            const lat2 = toRad(b.latitude);
-            const sinDLat = Math.sin(dLat / 2);
-            const sinDLon = Math.sin(dLon / 2);
-            const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
-            return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
-        };
+	// Suivi de la position: mettre à jour le point de départ tant que l'aventure n'est pas démarrée
+	useEffect(() => {
+		let subscription: any = null;
+		const THRESHOLD_METERS = 75; // seuil de mouvement pour MAJ du départ
 
-        (async () => {
-            try {
-                const { status } = await Location.requestForegroundPermissionsAsync();
-                if (status !== 'granted') return;
-                subscription = await Location.watchPositionAsync(
-                    {
-                        accuracy: Location.Accuracy.High,
-                        timeInterval: 5000,
-                        distanceInterval: 25,
-                    },
-                    async (loc) => {
-                        const newLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
-                        setCurrentLocation(newLoc);
-                        if (!adventureStarted && steps.length > 0) {
-                            const first = steps[0];
-                            if (first && first.name === 'Point de départ') {
-                                const dist = getDistanceMeters({ latitude: first.latitude, longitude: first.longitude }, newLoc);
-                                if (dist >= THRESHOLD_METERS) {
-                                    await updateStep(first.id, { latitude: newLoc.latitude, longitude: newLoc.longitude });
-                                    const refreshed = await listSteps(id);
-                                    setSteps(refreshed.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)));
-                                }
-                            }
-                        }
-                    }
-                );
-            } catch {}
-        })();
+		const toRad = (v: number) => (v * Math.PI) / 180;
+		const getDistanceMeters = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) => {
+			const R = 6371000; // Terre en m
+			const dLat = toRad(b.latitude - a.latitude);
+			const dLon = toRad(b.longitude - a.longitude);
+			const lat1 = toRad(a.latitude);
+			const lat2 = toRad(b.latitude);
+			const sinDLat = Math.sin(dLat / 2);
+			const sinDLon = Math.sin(dLon / 2);
+			const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLon * sinDLon;
+			return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+		};
 
-        return () => {
-            try { subscription && subscription.remove && subscription.remove(); } catch {}
-        };
-    }, [adventureStarted, steps, id]);
+		(async () => {
+			try {
+				const { status } = await Location.requestForegroundPermissionsAsync();
+				if (status !== 'granted') return;
+				subscription = await Location.watchPositionAsync(
+					{
+						accuracy: Location.Accuracy.High,
+						timeInterval: 5000,
+						distanceInterval: 25,
+					},
+					async (loc) => {
+						const newLoc = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+						setCurrentLocation(newLoc);
+						if (!adventureStarted && steps.length > 0) {
+							const first = steps[0];
+							if (first && first.name === 'Point de départ') {
+								const dist = getDistanceMeters({ latitude: first.latitude, longitude: first.longitude }, newLoc);
+								if (dist >= THRESHOLD_METERS) {
+									await updateStep(first.id, { latitude: newLoc.latitude, longitude: newLoc.longitude });
+									const refreshed = await listSteps(id);
+									setSteps(refreshed.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)));
+								}
+							}
+						}
+					}
+				);
+			} catch { }
+		})();
+
+		return () => {
+			try { subscription && subscription.remove && subscription.remove(); } catch { }
+		};
+	}, [adventureStarted, steps, id]);
 
 	useFocusEffect(
 		useCallback(() => {
@@ -247,8 +259,8 @@ export default function TripMapScreen() {
 			};
 		}
 
-		// Si pas d'étapes, centrer sur la position actuelle
-		if (steps.length === 0) {
+		// Si pas d'étapes, centrer sur la position actuelle ou la France
+		if (sortedSteps.length === 0) {
 			if (currentLocation) {
 				return {
 					latitude: currentLocation.latitude,
@@ -262,7 +274,21 @@ export default function TripMapScreen() {
 		}
 
 		// Centrer sur le voyage complet (du point de départ aux étapes + destination finale)
-		const allPoints = [...steps];
+		const allPoints = [...sortedSteps];
+		
+		// Inclure la position actuelle si disponible pour avoir une vue d'ensemble
+		if (currentLocation) {
+			allPoints.push({
+				id: -2, // ID temporaire pour la position actuelle
+				trip_id: Number(tripId),
+				name: 'Position actuelle',
+				description: 'Votre position',
+				latitude: currentLocation.latitude,
+				longitude: currentLocation.longitude,
+				order_index: -1,
+			});
+		}
+		
 		if (finalDestination) {
 			const finalDestinationStep: Step = {
 				id: -1, // ID temporaire pour la destination finale
@@ -287,16 +313,16 @@ export default function TripMapScreen() {
 		const latitude = (minLat + maxLat) / 2;
 		const longitude = (minLng + maxLng) / 2;
 
-		// Calculer les deltas pour inclure tout le voyage avec une marge
+		// Calculer les deltas pour inclure tout le voyage avec un dézoom maximum
 		const latRange = maxLat - minLat;
 		const lngRange = maxLng - minLng;
-		const margin = 0.1; // Marge de 10% autour du voyage
-
-		const latitudeDelta = Math.max(0.05, latRange * 1.2 + margin);
-		const longitudeDelta = Math.max(0.05, lngRange * 1.2 + margin);
+		
+		// Dézoom maximum tout en gardant les étapes visibles
+		const latitudeDelta = Math.max(0.5, latRange * 2.0 + 0.3);
+		const longitudeDelta = Math.max(0.5, lngRange * 2.0 + 0.3);
 
 		return { latitude, longitude, latitudeDelta, longitudeDelta };
-	}, [steps, showAddForm, currentLocation, finalDestination, id]);
+	}, [sortedSteps, showAddForm, currentLocation, finalDestination, id]);
 
 	const handleMapPress = async (event: any) => {
 		if (showAddForm) {
@@ -345,14 +371,14 @@ export default function TripMapScreen() {
 					description: 'Début de votre aventure',
 					order_index: 0
 				});
-            } else {
-                // Redéfinir simplement la position du point de départ avec la position actuelle
-                await updateStep(existingStart.id, {
-                    latitude: currentLocation.latitude,
-                    longitude: currentLocation.longitude,
-                    start_date: new Date().getTime(),
-                });
-            }
+			} else {
+				// Redéfinir simplement la position du point de départ avec la position actuelle
+				await updateStep(existingStart.id, {
+					latitude: currentLocation.latitude,
+					longitude: currentLocation.longitude,
+					start_date: new Date().getTime(),
+				});
+			}
 
 			setAdventureStarted(true);
 			await setTripAdventureStarted(id, true);
@@ -366,8 +392,8 @@ export default function TripMapScreen() {
 	};
 
 	const handleAddStep = async () => {
-		if (!selectedLocation || !stepName.trim()) {
-			Alert.alert('Erreur', 'Veuillez sélectionner un emplacement et saisir un nom');
+		if (!selectedLocation) {
+			Alert.alert('Erreur', 'Veuillez sélectionner un emplacement sur la carte');
 			return;
 		}
 
@@ -378,15 +404,15 @@ export default function TripMapScreen() {
 			const previousArrival = numExisting >= 1 ? steps[numExisting - 1] : null;
 			const existingWithoutArrival = numExisting >= 1 ? steps.slice(0, Math.max(0, numExisting - 1)) : [];
 
-			// Créer la nouvelle étape (on fixe un index provisoire, on réordonnera ensuite)
+			// Créer la nouvelle étape avec des valeurs par défaut
 			const newStepId = await createStep({
 				trip_id: id,
-				name: stepName.trim(),
+				name: stepName.trim() || 'Nouvelle étape',
 				latitude: selectedLocation.latitude,
 				longitude: selectedLocation.longitude,
-				start_date: new Date(stepDate).getTime(),
+				start_date: new Date().getTime(),
 				end_date: null,
-				description: stepDescription.trim() || null,
+				description: null,
 				order_index: insertIndex
 			});
 
@@ -422,13 +448,12 @@ export default function TripMapScreen() {
 			}
 			console.log('Étapes après ajout:', finalSortedData.map(s => ({ name: s.name, order: s.order_index })));
 
-			// Reset form
-			setStepName('');
-			setStepDescription('');
+			// Reset form et rediriger
 			setSelectedLocation(null);
 			setShowAddForm(false);
 
-			Alert.alert('Succès', 'Étape ajoutée avec succès');
+			// Rediriger vers la page de l'étape nouvellement créée
+			router.push(`/trip/${id}/step/${newStepId}`);
 		} catch (e: any) {
 			Alert.alert('Erreur', e.message ?? 'Impossible d\'ajouter l\'étape');
 		}
@@ -443,9 +468,7 @@ export default function TripMapScreen() {
 			}
 
 			const location = await Location.getCurrentPositionAsync({
-				accuracy: Location.Accuracy.High,
-				maximumAge: 5000, // 5 secondes
-				timeout: 10000 // 10 secondes
+				accuracy: Location.Accuracy.High
 			});
 
 			const newLocation = {
@@ -567,9 +590,9 @@ export default function TripMapScreen() {
 				)}
 
 				{/* Marqueurs des étapes */}
-				{steps.map((s, idx) => {
+				{sortedSteps.map((s, idx) => {
 					const isFirstStep = idx === 0;
-					const isLastStep = idx === steps.length - 1;
+					const isLastStep = idx === sortedSteps.length - 1;
 
 					return (
 						<Marker
@@ -600,39 +623,26 @@ export default function TripMapScreen() {
 						pinColor="orange"
 					/>
 				)}
-				{/* Lignes reliant la position actuelle aux étapes */}
-                {currentLocation && steps.length > 0 && (
+				{/* Lignes reliant les étapes */}
+				{sortedSteps.length > 0 && (
 					<>
-						{/* Ligne de la position actuelle vers la première étape (départ) - seulement avant le démarrage */}
-                        {!adventureStarted && (
-							<Polyline
-								coordinates={[
-									currentLocation,
-									{ latitude: steps[0].latitude, longitude: steps[0].longitude }
-								]}
-								strokeColor="#8b5cf6"
-								strokeWidth={3}
-								strokePattern={[10, 5]} // Ligne pointillée violette
-							/>
-						)}
-
 						{/* Lignes reliant les étapes intermédiaires (sans l'arrivée) */}
-						{steps.length >= 2 && (
+						{sortedSteps.length >= 2 && (
 							<Polyline
-								coordinates={(steps.length === 2 ? steps : steps.slice(0, -1)).map(s => ({
+								coordinates={(sortedSteps.length === 2 ? sortedSteps : sortedSteps.slice(0, -1)).map(s => ({
 									latitude: s.latitude, longitude: s.longitude
 								}))}
-								strokeColor="#10b981"
+								strokeColor="#3b82f6"
 								strokeWidth={4}
 							/>
 						)}
 
 						{/* Ligne de la dernière étape intermédiaire vers l'arrivée */}
-						{steps.length > 2 && (
+						{sortedSteps.length > 2 && (
 							<Polyline
 								coordinates={[
-									{ latitude: steps[steps.length - 2].latitude, longitude: steps[steps.length - 2].longitude },
-									{ latitude: steps[steps.length - 1].latitude, longitude: steps[steps.length - 1].longitude }
+									{ latitude: sortedSteps[sortedSteps.length - 2].latitude, longitude: sortedSteps[sortedSteps.length - 2].longitude },
+									{ latitude: sortedSteps[sortedSteps.length - 1].latitude, longitude: sortedSteps[sortedSteps.length - 1].longitude }
 								]}
 								strokeColor="#f59e0b"
 								strokeWidth={4}
@@ -685,7 +695,7 @@ export default function TripMapScreen() {
 						<View style={styles.searchResults}>
 							<FlatList
 								data={searchResults}
-								keyExtractor={(item) => item.id}
+								keyExtractor={(item: any) => item.id}
 								renderItem={({ item }) => (
 									<Pressable
 										style={styles.searchResultItem}
@@ -702,34 +712,9 @@ export default function TripMapScreen() {
 				</View>
 			)}
 
-			{/* Add step form */}
+			{/* Add step form - simplifié */}
 			{showAddForm && (
 				<View style={styles.addForm}>
-					<Text style={styles.formTitle}>
-						{selectedLocation ? 'Étape sélectionnée' : 'Sélectionnez un emplacement sur la carte'}
-					</Text>
-					<TextInput
-						style={styles.input}
-						placeholder="Nom de l'étape (ex: Tour Eiffel, Lyon)"
-						value={stepName}
-						onChangeText={(t) => { setStepName(t); setIsStepNameAuto(false); }}
-					/>
-					<TextInput
-						style={[styles.input, styles.textArea]}
-						placeholder="Description (optionnel)"
-						value={stepDescription}
-						onChangeText={setStepDescription}
-						multiline
-						numberOfLines={2}
-					/>
-
-					<Text style={styles.label}>Date de l'étape</Text>
-					<TextInput
-						style={styles.input}
-						placeholder="YYYY-MM-DD"
-						value={stepDate}
-						onChangeText={setStepDate}
-					/>
 					{selectedLocation && (
 						<View style={styles.locationInfo}>
 							<View style={styles.coordsContainer}>
@@ -744,9 +729,9 @@ export default function TripMapScreen() {
 						</View>
 					)}
 					<Pressable
-						style={[styles.addButton, (!selectedLocation || !stepName.trim()) && styles.addButtonDisabled]}
+						style={[styles.addButton, !selectedLocation && styles.addButtonDisabled]}
 						onPress={handleAddStep}
-						disabled={!selectedLocation || !stepName.trim()}
+						disabled={!selectedLocation}
 					>
 						<Text style={styles.addButtonText}>Ajouter l'étape</Text>
 					</Pressable>
@@ -757,31 +742,31 @@ export default function TripMapScreen() {
 			{!showAddForm && showLegend && (
 				<View style={styles.colorLegend}>
 					<Text style={styles.legendTitle}>Légende</Text>
-						<View style={styles.legendItems}>
-							<View style={styles.legendItem}>
-								<View style={styles.legendRing}>
-									<View style={styles.legendRingInner} />
-								</View>
-								<Text style={styles.legendText}>Ma position</Text>
+					<View style={styles.legendItems}>
+						<View style={styles.legendItem}>
+							<View style={styles.legendRing}>
+								<View style={styles.legendRingInner} />
 							</View>
-							<View style={styles.legendItem}>
-								<View style={[styles.legendBadge, styles.legendBadgeStart]} />
-								<Text style={styles.legendText}>Point de départ</Text>
-							</View>
-							<View style={styles.legendItem}>
-								<View style={[styles.legendBadge, styles.legendBadgeMid]} />
-								<Text style={styles.legendText}>Étapes intermédiaires</Text>
-							</View>
-							<View style={styles.legendItem}>
-								<View style={[styles.legendBadge, styles.legendBadgeArrival]} />
-								<Text style={styles.legendText}>Point d'arrivée</Text>
-							</View>
+							<Text style={styles.legendText}>Ma position</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendBadge, styles.legendBadgeStart]} />
+							<Text style={styles.legendText}>Point de départ</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendBadge, styles.legendBadgeMid]} />
+							<Text style={styles.legendText}>Étapes intermédiaires</Text>
+						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendBadge, styles.legendBadgeArrival]} />
+							<Text style={styles.legendText}>Point d'arrivée</Text>
+						</View>
 						<View style={styles.legendItem}>
 							<View style={[styles.legendLine, { backgroundColor: '#8b5cf6' }]} />
 							<Text style={styles.legendText}>Trajet vers le départ</Text>
 						</View>
 						<View style={styles.legendItem}>
-							<View style={[styles.legendLine, { backgroundColor: '#10b981' }]} />
+							<View style={[styles.legendLine, { backgroundColor: '#3b82f6' }]} />
 							<Text style={styles.legendText}>Étapes intermédiaires</Text>
 						</View>
 						<View style={styles.legendItem}>
@@ -792,32 +777,51 @@ export default function TripMapScreen() {
 				</View>
 			)}
 
-			{/* Add step button when not in add mode */}
+			{/* Boutons fixes - disposition séparée */}
 			{!showAddForm && (
-				<View style={styles.bottomActions}>
-					{/* Bouton toggle légende - à gauche du bouton principal */}
+				<>
+					{/* Bouton légende - bas gauche */}
 					<Pressable
-						style={[styles.legendToggleButton, showLegend && styles.legendToggleButtonActive]}
-						onPress={() => setShowLegend(!showLegend)}
+						style={[styles.legendToggleButtonFixed, showLegend && styles.legendToggleButtonActive]}
+						onPress={() => {
+							setShowLegend(!showLegend);
+							// Masquer les étapes du voyage si on ouvre la légende
+							if (!showLegend) {
+								setIsReordering(false);
+							}
+						}}
 					>
 						<Text style={styles.legendToggleIcon}>
 							{showLegend ? '📊' : '📋'}
 						</Text>
 					</Pressable>
 
-					<Pressable style={styles.addStepButton} onPress={() => setShowAddForm(true)}>
+					{/* Bouton ajouter étape - bas centre */}
+					<Pressable style={styles.addStepButtonFixed} onPress={() => {
+						setShowAddForm(true);
+						// Masquer les étapes du voyage si on ouvre le formulaire d'ajout
+						setIsReordering(false);
+					}}>
 						<Text style={styles.addStepButtonText}>+ Ajouter une étape</Text>
 					</Pressable>
-                    {steps.length >= 1 && (
+
+					{/* Bouton afficher étapes - bas droite */}
+					{steps.length >= 1 && (
 						<Pressable
-							style={[styles.reorderIconButton, isReordering && styles.reorderIconButtonActive]}
-							onPress={() => setIsReordering(!isReordering)}
+							style={[styles.reorderIconButtonFixed, isReordering && styles.reorderIconButtonActive]}
+							onPress={() => {
+								setIsReordering(!isReordering);
+								// Masquer la légende si on ouvre les étapes du voyage
+								if (!isReordering) {
+									setShowLegend(false);
+								}
+							}}
 							accessibilityLabel="Réorganiser les étapes"
 						>
-                            <Text style={styles.reorderIcon}>{isReordering ? '✖' : '🧭'}</Text>
+							<Text style={styles.reorderIcon}>{isReordering ? '✖' : '🧭'}</Text>
 						</Pressable>
 					)}
-				</View>
+				</>
 			)}
 
 
@@ -863,12 +867,14 @@ export default function TripMapScreen() {
 					{DraggableFlatList ? (
 						<DraggableFlatList
 							data={sortedSteps}
-							keyExtractor={(item) => String(item.id)}
-							renderItem={({ item, index, drag, isActive }: any) => {
+							keyExtractor={(item: Step) => String(item.id)}
+							renderItem={({ item, index, drag, isActive }: { item: Step; index: number; drag: () => void; isActive: boolean }) => {
 								const currentIndex = (item?.order_index ?? (typeof index === 'number' ? index : sortedSteps.findIndex(s => s.id === item.id)));
 								const isFirstStep = currentIndex === 0;
 								const isLastStep = currentIndex === sortedSteps.length - 1;
-								const canReorder = currentIndex > 0 && currentIndex < (sortedSteps.length - 1);
+								const isStartingStep = item.name === 'Point de départ';
+								const isTemporaryStarting = isStartingStep && !adventureStarted;
+								const canReorder = !isStartingStep && currentIndex !== 0 && currentIndex < (sortedSteps.length - 1);
 								return (
 									<Pressable style={[
 										styles.stepItem,
@@ -878,12 +884,13 @@ export default function TripMapScreen() {
 									]}
 										onPress={() => router.push(`/trip/${id}/step/${item.id}`)}
 									>
-                                    <Text style={[
-                                        styles.stepNumber,
-                                        isFirstStep ? styles.stepNumberStart : (isLastStep ? styles.stepNumberArrival : styles.stepNumberMid)
-                                    ]}>{(currentIndex + 1)}</Text>
+										<Text style={[
+											styles.stepNumber,
+											isFirstStep ? styles.stepNumberStart : (isLastStep ? styles.stepNumberArrival : styles.stepNumberMid)
+										]}>{(currentIndex + 1)}</Text>
 										<Text style={styles.stepName}>{item.name}</Text>
-										{isFirstStep && (<Text style={[styles.stepTag, styles.startTag]}>Départ</Text>)}
+										{isTemporaryStarting && (<Text style={[styles.stepTag, styles.startTag]}>Départ (temporaire)</Text>)}
+										{isStartingStep && adventureStarted && (<Text style={[styles.stepTag, styles.startTag]}>Départ</Text>)}
 										{isLastStep && (<Text style={[styles.stepTag, styles.arrivalTag]}>Arrivée</Text>)}
 										{canReorder ? (
 											<Pressable style={styles.dragHandle} onLongPress={drag}>
@@ -893,9 +900,11 @@ export default function TripMapScreen() {
 									</Pressable>
 								);
 							}}
-							onDragEnd={async ({ data, from, to }) => {
-								// Empêcher de déplacer départ (index 0) et arrivée (dernier index)
-								if (to === 0 || to === data.length - 1 || from === 0 || from === data.length - 1) {
+							onDragEnd={async ({ data, from, to }: { data: Step[]; from: number; to: number }) => {
+								// Empêcher de déplacer le point de départ (index 0) et arrivée (dernier index)
+								const fromItem = data[from];
+								const toItem = data[to];
+								if (fromItem?.name === 'Point de départ' || toItem?.name === 'Point de départ' || to === 0 || to === data.length - 1 || from === 0 || from === data.length - 1) {
 									setBlockedIndex(from);
 									setTimeout(() => setBlockedIndex(null), 250);
 									return;
@@ -917,13 +926,15 @@ export default function TripMapScreen() {
 					) : (
 						<FlatList
 							data={sortedSteps}
-							keyExtractor={(item) => String(item.id)}
+							keyExtractor={(item: Step) => String(item.id)}
 							renderItem={({ item, index }) => {
 								const isFirstStep = index === 0;
 								const isLastStep = index === sortedSteps.length - 1;
-								const canReorder = !isFirstStep && !isLastStep;
+								const isStartingStep = item.name === 'Point de départ';
+								const isTemporaryStarting = isStartingStep && !adventureStarted;
+								const canReorder = !isStartingStep && index !== 0 && !isLastStep;
 								return (
-                                <Pressable
+									<Pressable
 										style={[
 											styles.stepItem,
 											isFirstStep && styles.startStepItem,
@@ -931,21 +942,20 @@ export default function TripMapScreen() {
 										]}
 										onPress={() => router.push(`/trip/${id}/step/${item.id}`)}
 									>
-                                    <Text style={[
-                                        styles.stepNumber,
-                                        isFirstStep ? styles.stepNumberStart : (isLastStep ? styles.stepNumberArrival : styles.stepNumberMid)
-                                    ]}>{(item.order_index ?? index) + 1}</Text>
+										<Text style={[
+											styles.stepNumber,
+											isFirstStep ? styles.stepNumberStart : (isLastStep ? styles.stepNumberArrival : styles.stepNumberMid)
+										]}>{(item.order_index ?? index) + 1}</Text>
 										<View style={styles.stepContentCol}>
 											<Text style={styles.stepName} numberOfLines={1}>{item.name}</Text>
 											<View style={styles.stepTagsRow}>
-												{isFirstStep && (<Text style={[styles.stepTag, styles.startTag]}>Départ</Text>)}
+												{isTemporaryStarting && (<Text style={[styles.stepTag, styles.startTag]}>Départ (temporaire)</Text>)}
+												{isStartingStep && adventureStarted && (<Text style={[styles.stepTag, styles.startTag]}>Départ</Text>)}
 												{isLastStep && (<Text style={[styles.stepTag, styles.arrivalTag]}>Arrivée</Text>)}
 											</View>
 										</View>
 										{canReorder ? (
 											<Text style={styles.dragIcon}>⋮⋮</Text>
-										) : isFirstStep ? (
-											<Text style={styles.fixedStepText}>Départ (fixe)</Text>
 										) : null}
 									</Pressable>
 								);
@@ -1072,22 +1082,7 @@ const styles = StyleSheet.create({
 		bottom: 0,
 		left: 0,
 		right: 0,
-		backgroundColor: 'white',
-		borderTopLeftRadius: 20,
-		borderTopRightRadius: 20,
 		padding: 20,
-		shadowColor: '#000',
-		shadowOpacity: 0.1,
-		shadowRadius: 20,
-		shadowOffset: { width: 0, height: -5 },
-		elevation: 10,
-	},
-	formTitle: {
-		fontSize: 16,
-		fontWeight: '700',
-		color: '#0f172a',
-		marginBottom: 16,
-		textAlign: 'center',
 	},
 	input: {
 		borderWidth: 1,
@@ -1147,16 +1142,30 @@ const styles = StyleSheet.create({
 		fontWeight: '800',
 		fontSize: 16,
 	},
-	bottomActions: {
+	// Boutons fixes - positions séparées
+	legendToggleButtonFixed: {
 		position: 'absolute',
 		bottom: 30,
 		left: 16,
-		right: 16,
-		flexDirection: 'row',
+		width: 50,
+		height: 50,
+		borderRadius: 25,
+		backgroundColor: 'white',
+		borderWidth: 2,
+		borderColor: '#d1d5db',
 		alignItems: 'center',
-		gap: 12,
+		justifyContent: 'center',
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
 	},
-	addStepButton: {
+	addStepButtonFixed: {
+		position: 'absolute',
+		bottom: 30,
+		left: 0,
+		right: 0,
 		backgroundColor: '#10b981',
 		borderRadius: 25,
 		paddingHorizontal: 24,
@@ -1166,20 +1175,29 @@ const styles = StyleSheet.create({
 		shadowRadius: 12,
 		shadowOffset: { width: 0, height: 6 },
 		elevation: 6,
+		alignItems: 'center',
+		marginHorizontal: 80, // Espace pour les boutons latéraux (50 + 16 + 14 de marge)
 	},
-	addStepButtonText: {
-		color: 'white',
-		fontWeight: '800',
-		fontSize: 16,
-	},
-	reorderIconButton: {
+	reorderIconButtonFixed: {
+		position: 'absolute',
+		bottom: 30,
+		right: 16,
 		width: 50,
 		height: 50,
 		borderRadius: 25,
 		backgroundColor: '#6b7280',
 		alignItems: 'center',
 		justifyContent: 'center',
-		marginTop: 8,
+		shadowColor: '#000',
+		shadowOpacity: 0.2,
+		shadowRadius: 8,
+		shadowOffset: { width: 0, height: 4 },
+		elevation: 4,
+	},
+	addStepButtonText: {
+		color: 'white',
+		fontWeight: '800',
+		fontSize: 16,
 	},
 	reorderIconButtonActive: {
 		backgroundColor: '#10b981',
@@ -1275,9 +1293,9 @@ const styles = StyleSheet.create({
 		gap: 6,
 		alignItems: 'center',
 	},
-    stepIconBadge: {
-        display: 'none'
-    },
+	stepIconBadge: {
+		display: 'none'
+	},
 	stepTag: {
 		marginLeft: 8,
 		paddingHorizontal: 8,
@@ -1621,21 +1639,6 @@ const styles = StyleSheet.create({
 		color: 'white',
 		fontWeight: '700',
 		fontSize: 16,
-	},
-	legendToggleButton: {
-		width: 50,
-		height: 50,
-		borderRadius: 25,
-		backgroundColor: 'white',
-		borderWidth: 2,
-		borderColor: '#d1d5db',
-		alignItems: 'center',
-		justifyContent: 'center',
-		shadowColor: '#000',
-		shadowOpacity: 0.2,
-		shadowRadius: 8,
-		shadowOffset: { width: 0, height: 4 },
-		elevation: 4,
 	},
 	legendToggleButtonActive: {
 		backgroundColor: '#10b981',

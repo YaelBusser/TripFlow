@@ -1,6 +1,7 @@
 import * as Location from 'expo-location';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import LocationIcon from './ui/location-icon';
 
 let MapView: any = null;
 let Marker: any = null;
@@ -274,7 +275,7 @@ export default function DestinationMapSelector({ onDestinationSelected, onCancel
        {currentLocation && (
          <View style={styles.recenterButtonContainer}>
            <Pressable style={styles.recenterButton} onPress={centerOnCurrentLocation}>
-             <Text style={styles.recenterIcon}>🎯</Text>
+             <Text style={styles.recenterIcon}><LocationIcon/></Text>
            </Pressable>
          </View>
        )}

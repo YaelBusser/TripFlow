@@ -7,7 +7,7 @@ import { Alert, Dimensions, FlatList, Image, ImageBackground, Modal, Platform, P
 import { SafeAreaView } from 'react-native-safe-area-context';
 import DestinationMapSelector from '../../components/DestinationMapSelector';
 import LocationIcon from '../../components/ui/location-icon';
-import { colors } from '../../lib/colors';
+import { useTheme } from '../../contexts/ThemeContext';
 import { getCurrentUser } from '../../lib/session';
 import { createStep, listSteps } from '../../lib/steps';
 import { addTripImage, getTripImages } from '../../lib/trip-images';
@@ -18,6 +18,7 @@ const { width } = Dimensions.get('window');
 const cardWidth = (width - 48) / 2; // 2 colonnes avec marges
 
 export default function ExploreScreen() {
+  const { themeColors } = useTheme();
   const [userId, setUserId] = useState<number | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(false);
@@ -264,7 +265,7 @@ export default function ExploreScreen() {
 
     return (
       <Pressable 
-        style={styles.card} 
+        style={dynamicStyles.card} 
         onPress={() => router.push(`/trip/${item.id}/details`)}
       >
         <ImageBackground 
@@ -278,7 +279,7 @@ export default function ExploreScreen() {
           <View style={styles.cardContent}>
             {/* Trip title and participants count */}
             <View style={styles.cardHeader}>
-              <Text style={styles.tripTitle}>{item.title}</Text>
+              <Text style={dynamicStyles.tripTitle}>{item.title}</Text>
               <View style={styles.participantsBadge}>
                 <Text style={styles.participantsIcon}>👥</Text>
                 <Text style={styles.participantsCount}>x{participants.length + 1}</Text>
@@ -288,7 +289,7 @@ export default function ExploreScreen() {
             {/* Location */}
             <View style={styles.locationRow}>
               <View style={styles.locationIconContainer}>
-                <LocationIcon size={14} color={colors.keppelDark} />
+                <LocationIcon size={14} color={themeColors.primary} />
               </View>
               <Text style={styles.locationText}>{item.destination || 'Destination'}</Text>
             </View>
@@ -308,12 +309,63 @@ export default function ExploreScreen() {
     );
   };
 
+  const dynamicStyles = StyleSheet.create({
+    container: { 
+      flex: 1, 
+      padding: 16, 
+      backgroundColor: themeColors.backgroundSecondary
+    },
+    header: { 
+      fontSize: 24, 
+      fontWeight: '900', 
+      color: themeColors.textPrimary
+    },
+    fab: { 
+      width: 40, 
+      height: 40, 
+      borderRadius: 20, 
+      backgroundColor: themeColors.primary, 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      shadowColor: themeColors.primary,
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    fabText: { 
+      color: themeColors.backgroundPrimary, 
+      fontWeight: 'bold', 
+      fontSize: 24,
+      lineHeight: 26,
+    },
+    card: { 
+      backgroundColor: 'transparent', 
+      borderRadius: 20, 
+      overflow: 'hidden',
+      marginBottom: 20,
+      shadowColor: themeColors.primary,
+      shadowOpacity: 0.3,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 8,
+    },
+    tripTitle: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: '#FFFFFF', // Toujours blanc sur fond sombre
+      flex: 1,
+      marginRight: 12,
+    },
+    // ... autres styles dynamiques
+  });
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={dynamicStyles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.header}>Vos voyages récents</Text>
-        <Pressable style={styles.fab} onPress={() => setShowCreateModal(true)}>
-          <Text style={styles.fabText}>+</Text>
+        <Text style={dynamicStyles.header}>Vos voyages récents</Text>
+        <Pressable style={dynamicStyles.fab} onPress={() => setShowCreateModal(true)}>
+          <Text style={dynamicStyles.fabText}>+</Text>
         </Pressable>
       </View>
 
@@ -513,57 +565,17 @@ export default function ExploreScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    padding: 16, 
-    backgroundColor: colors.backgroundSecondary
-  },
   headerRow: { 
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'space-between', 
     marginBottom: 20 
   },
-  header: { 
-    fontSize: 24, 
-    fontWeight: '900', 
-    color: colors.textPrimary
-  },
-  fab: { 
-    width: 40, 
-    height: 40, 
-    borderRadius: 20, 
-    backgroundColor: colors.keppel, 
-    alignItems: 'center', 
-    justifyContent: 'center',
-    shadowColor: colors.keppel,
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  fabText: { 
-    color: colors.white, 
-    fontWeight: 'bold', 
-    fontSize: 24,
-    lineHeight: 26,
-  },
   inputRow: {
     marginBottom: 20,
   },
   listContainer: {
     paddingBottom: 100,
-  },
-  card: { 
-    backgroundColor: 'transparent', 
-    borderRadius: 20, 
-    overflow: 'hidden',
-    marginBottom: 20,
-    shadowColor: colors.keppel,
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 8,
   },
   cover: { 
     height: 180, 
@@ -593,13 +605,6 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 12,
   },
-  tripTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: colors.white,
-    flex: 1,
-    marginRight: 12,
-  },
   participantsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -615,7 +620,7 @@ const styles = StyleSheet.create({
   participantsCount: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.white,
+    color: '#FFFFFF',
   },
   locationRow: {
     flexDirection: 'row',
@@ -628,7 +633,7 @@ const styles = StyleSheet.create({
   locationText: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.keppelDark,
+    color: '#259B8A', // colors.keppelDark
   },
   countryText: {
     fontSize: 10,
@@ -869,25 +874,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   createButton: {
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 20,
     marginBottom: 40,
-    shadowColor: colors.keppel,
+    shadowColor: '#2FB6A1', // colors.keppel
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 4,
   },
   createButtonDisabled: {
-    backgroundColor: colors.textTertiary,
+    backgroundColor: '#8A8A8A', // colors.textTertiary
     shadowOpacity: 0,
     elevation: 0,
   },
   createButtonText: {
-    color: colors.white,
+    color: '#FFFFFF',
     fontWeight: '800',
     fontSize: 16,
   },
@@ -950,7 +955,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   imageLibraryActionText: {
-    color: colors.white,
+    color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '600',
   },
@@ -966,12 +971,12 @@ const styles = StyleSheet.create({
   emptyImageLibraryText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     marginBottom: 4,
   },
   emptyImageLibrarySubtext: {
     fontSize: 14,
-    color: colors.textTertiary,
+    color: '#8A8A8A', // colors.textTertiary
   },
   addImageButton: {
     backgroundColor: '#2FB6A1',

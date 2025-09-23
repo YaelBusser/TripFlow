@@ -1,8 +1,11 @@
 import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { StyleSheet, View } from 'react-native';
+import { useTheme } from '../contexts/ThemeContext';
 import { getCurrentUser, isSessionValid } from '../lib/session';
 
 export default function Index() {
+	const { themeColors } = useTheme();
 	const [ready, setReady] = useState(false);
 	const [loggedIn, setLoggedIn] = useState<boolean | null>(null);
 
@@ -29,10 +32,24 @@ export default function Index() {
 		})();
 	}, []);
 
-	if (!ready) return null;
+	if (!ready) {
+		return (
+			<View style={[styles.loadingContainer, { backgroundColor: themeColors.backgroundSecondary }]}>
+				{/* Optionnel: ajouter un indicateur de chargement */}
+			</View>
+		);
+	}
 	if (!loggedIn) return <Redirect href="/auth" />;
 	return <Redirect href="/(tabs)/explore" />;
 }
+
+const styles = StyleSheet.create({
+	loadingContainer: {
+		flex: 1,
+		justifyContent: 'center',
+		alignItems: 'center',
+	},
+});
 
 
 

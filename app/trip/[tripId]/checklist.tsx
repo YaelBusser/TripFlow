@@ -2,9 +2,11 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTheme } from '../../../contexts/ThemeContext';
 import { ChecklistItem, createChecklistItem, deleteChecklistItem, listChecklistItems, toggleChecklistItem, updateChecklistItem } from '../../../lib/checklist';
 
 export default function ChecklistScreen() {
+  const { themeColors } = useTheme();
   const { tripId } = useLocalSearchParams<{ tripId: string }>();
   const id = Number(tripId);
   const [items, setItems] = useState<ChecklistItem[]>([]);
@@ -131,18 +133,81 @@ export default function ChecklistScreen() {
   const completedCount = items.filter(item => item.is_checked).length;
   const totalCount = items.length;
 
+  const dynamicStyles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: themeColors.backgroundSecondary,
+    },
+    header: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 20,
+      paddingVertical: 16,
+      backgroundColor: themeColors.backgroundPrimary,
+      borderBottomWidth: 1,
+      borderBottomColor: themeColors.borderLight,
+    },
+    headerTitle: {
+      fontSize: 20,
+      fontWeight: '800',
+      color: themeColors.textPrimary,
+    },
+    addButton: {
+      backgroundColor: themeColors.primary,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+    },
+    addButtonText: {
+      color: themeColors.backgroundPrimary,
+      fontWeight: '600',
+      fontSize: 14,
+    },
+    listContainer: {
+      flex: 1,
+      padding: 20,
+    },
+    item: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: themeColors.backgroundPrimary,
+      padding: 16,
+      marginBottom: 8,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: themeColors.borderLight,
+      shadowColor: themeColors.shadowLight,
+      shadowOpacity: 1,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 2,
+    },
+    itemText: {
+      flex: 1,
+      fontSize: 16,
+      color: themeColors.textPrimary,
+      marginLeft: 12,
+    },
+    completedText: {
+      textDecorationLine: 'line-through',
+      color: themeColors.textTertiary,
+    },
+    // ... autres styles dynamiques
+  });
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={dynamicStyles.container}>
+      <View style={dynamicStyles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backIcon}>←</Text>
         </Pressable>
-        <Text style={styles.title}>Checklist</Text>
+        <Text style={dynamicStyles.headerTitle}>Préparation valise</Text>
         <Pressable 
-          style={styles.addButton} 
+          style={dynamicStyles.addButton} 
           onPress={() => setShowAddModal(true)}
         >
-          <Text style={styles.addIcon}>+</Text>
+          <Text style={dynamicStyles.addButtonText}>+</Text>
         </Pressable>
       </View>
 
@@ -165,12 +230,12 @@ export default function ChecklistScreen() {
         data={items}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
-        contentContainerStyle={styles.listContainer}
+        contentContainerStyle={dynamicStyles.listContainer}
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
             <Text style={styles.emptyIcon}>📝</Text>
             <Text style={styles.emptyTitle}>Aucun élément</Text>
-            <Text style={styles.emptyText}>Ajoutez votre premier élément à la checklist</Text>
+            <Text style={styles.emptyText}>Ajoutez les éléments à mettre dans votre valise</Text>
           </View>
         }
       />
@@ -179,19 +244,19 @@ export default function ChecklistScreen() {
       <Modal visible={showAddModal} animationType="slide" presentationStyle="pageSheet">
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Nouvel élément</Text>
+            <Text style={styles.modalTitle}>Ajouter à la valise</Text>
             <TouchableOpacity onPress={() => setShowAddModal(false)}>
               <Text style={styles.modalClose}>✕</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.modalContent}>
-            <Text style={styles.label}>Texte de l'élément</Text>
+            <Text style={styles.label}>Élément à mettre dans la valise</Text>
             <TextInput
               style={styles.input}
               value={newItemText}
               onChangeText={setNewItemText}
-              placeholder="Ex: Passport, Billets d'avion..."
+              placeholder="Ex: Passport, Billets d'avion, Vêtements..."
               multiline
             />
             
@@ -217,12 +282,12 @@ export default function ChecklistScreen() {
           </View>
 
           <View style={styles.modalContent}>
-            <Text style={styles.label}>Texte de l'élément</Text>
+            <Text style={styles.label}>Élément à mettre dans la valise</Text>
             <TextInput
               style={styles.input}
               value={editItemText}
               onChangeText={setEditItemText}
-              placeholder="Ex: Passport, Billets d'avion..."
+              placeholder="Ex: Passport, Billets d'avion, Vêtements..."
               multiline
             />
             

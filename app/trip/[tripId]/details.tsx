@@ -8,7 +8,7 @@ import { Alert, Animated, Dimensions, Image, ImageBackground, Modal, Pressable, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LocationIcon from '../../../components/ui/location-icon';
 import { ChecklistItem, listChecklistItems, toggleChecklistItem } from '../../../lib/checklist';
-import { colors } from '../../../lib/colors';
+import { useTheme } from '../../../contexts/ThemeContext';
 // import { JournalEntry, listJournal } from '../../../lib/journal';
 import { getCurrentUser } from '../../../lib/session';
 import { deleteStep, deleteStepImagesByUriForTrip, getTripStepImagesWithSteps, listSteps, Step, updateStep } from '../../../lib/steps';
@@ -17,6 +17,7 @@ import { addTripParticipant, deleteTripParticipant, getTripParticipants, TripPar
 import { deleteTrip, getTrip, Trip, updateTrip } from '../../../lib/trips';
 
 export default function TripDetailsHero() {
+  const { themeColors } = useTheme();
   const { tripId } = useLocalSearchParams<{ tripId: string }>();
   const id = Number(tripId);
   const [trip, setTrip] = useState<Trip | null>(null);
@@ -511,20 +512,82 @@ export default function TripDetailsHero() {
     return s || e;
   }, [trip]);
 
+  const dynamicStyles = StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: themeColors.backgroundSecondary,
+    },
+    backBtn: {
+      position: 'absolute',
+      top: 60,
+      left: 20,
+      zIndex: 10,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    backIcon: {
+      color: '#FFFFFF',
+      fontSize: 20,
+      fontWeight: 'bold',
+    },
+    editBtn: {
+      position: 'absolute',
+      top: 60,
+      right: 20,
+      zIndex: 10,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    editIcon: {
+      color: '#FFFFFF',
+      fontSize: 16,
+    },
+    likeFab: {
+      position: 'absolute',
+      bottom: 30,
+      right: 20,
+      zIndex: 10,
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: themeColors.primary,
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: themeColors.shadowDark,
+      shadowOpacity: 1,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 8,
+    },
+    likeIcon: {
+      color: '#FFFFFF',
+      fontSize: 24,
+    },
+    // ... autres styles dynamiques
+  });
+
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={dynamicStyles.container}>
       {/* Composant interne pour afficher le nom du lieu par lat/lng */}
       {/* Déclaré ici pour accéder à resolver via props */}
       {null}
       {/* Fixed buttons - outside ScrollView */}
-      <Pressable style={styles.backBtn} onPress={() => router.back()}>
-        <Text style={styles.backIcon}>←</Text>
+      <Pressable style={dynamicStyles.backBtn} onPress={() => router.back()}>
+        <Text style={dynamicStyles.backIcon}>←</Text>
       </Pressable>
-      <Pressable style={styles.editBtn} onPress={() => setShowEditModal(true)}>
-        <Text style={styles.editIcon}>✏️</Text>
+      <Pressable style={dynamicStyles.editBtn} onPress={() => setShowEditModal(true)}>
+        <Text style={dynamicStyles.editIcon}>✏️</Text>
       </Pressable>
-      <Pressable style={styles.likeFab}>
-        <Text style={styles.likeIcon}>♡</Text>
+      <Pressable style={dynamicStyles.likeFab}>
+        <Text style={dynamicStyles.likeIcon}>♡</Text>
       </Pressable>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -636,7 +699,7 @@ export default function TripDetailsHero() {
       <View style={styles.content}>
         <View style={styles.locationRow}>
           <View style={styles.locationIconContainer}>
-            <LocationIcon size={16} color={colors.keppelDark} />
+            <LocationIcon size={16} color={themeColors.primary} />
           </View>
           <Text style={styles.place}>{trip?.destination || 'Destination'}</Text>
           <View style={styles.participantsBadge}>
@@ -644,15 +707,22 @@ export default function TripDetailsHero() {
             <Text style={styles.participantsCount}>{tripParticipants.length + 1}</Text>
           </View>
         </View>
-        <View style={styles.titleRow}>
-          <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
-          <Pressable style={styles.mapButton} onPress={goToMap}>
-            <Text style={styles.mapButtonText}>🗺️ Carte</Text>
-          </Pressable>
-        </View>
+        <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
         <Text style={styles.desc}>
           {trip?.description || 'Aucune description disponible.'}
         </Text>
+        
+        {/* Bouton carte agrandi */}
+        <Pressable style={styles.mapButtonLarge} onPress={goToMap}>
+          <View style={styles.mapButtonContent}>
+            <Text style={styles.mapButtonIcon}>🗺️</Text>
+            <View style={styles.mapButtonTextContainer}>
+              <Text style={styles.mapButtonTitle}>Gérer les étapes du voyage</Text>
+              <Text style={styles.mapButtonSubtitle}>Ajouter, modifier et organiser vos étapes sur la carte</Text>
+            </View>
+            <Text style={styles.mapButtonArrow}>→</Text>
+          </View>
+        </Pressable>
         {!!dateRange && <Text style={styles.dates}>{dateRange}</Text>}
       </View>
 
@@ -1279,7 +1349,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   place: { 
-    color: colors.keppelDark, 
+    color: '#259B8A', // colors.keppelDark 
     fontWeight: '800', 
     fontSize: 16,
     flex: 1,
@@ -1689,6 +1759,8 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '700',
+    width: '100%',
+    textAlign: 'center',
   },
   saveButton: {
     backgroundColor: '#10b981',
@@ -1795,7 +1867,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 8,
     left: 8,
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     width: 24,
     height: 24,
     borderRadius: 12,
@@ -1889,7 +1961,7 @@ const styles = StyleSheet.create({
   participantsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -1901,11 +1973,11 @@ const styles = StyleSheet.create({
   participantsCount: {
     fontSize: 12,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
   },
   stepDate: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     marginTop: 4,
     fontStyle: 'italic',
   },
@@ -1929,20 +2001,20 @@ const styles = StyleSheet.create({
   },
   // Unified manage button style
   manageButton: {
-    backgroundColor: colors.white,
+    backgroundColor: '#FFFFFF', // colors.white
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: '#E2E8F0', // colors.borderLight
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    shadowColor: colors.shadowLight,
+    shadowColor: 'rgba(0, 0, 0, 0.1)', // colors.shadowLight
     shadowOpacity: 0.1,
     shadowRadius: 2,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
   manageButtonText: {
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
     fontSize: 14,
     fontWeight: '600',
   },
@@ -1950,26 +2022,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  mapButton: {
-    backgroundColor: colors.keppel,
-    borderRadius: 14,
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    shadowColor: colors.keppel,
-    shadowOpacity: 0.35,
-    shadowRadius: 8,
+  mapButtonLarge: {
+    backgroundColor: '#2FB6A1', // colors.keppel
+    borderRadius: 16,
+    padding: 20,
+    marginTop: 20,
+    marginBottom: 16,
+    shadowColor: '#2FB6A1', // colors.keppel
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 5,
-    alignSelf: 'flex-start',
+    elevation: 6,
+  },
+  mapButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 16,
   },
-  mapButtonText: {
-    color: colors.white,
-    fontSize: 16,
+  mapButtonIcon: {
+    fontSize: 32,
+  },
+  mapButtonTextContainer: {
+    flex: 1,
+  },
+  mapButtonTitle: {
+    color: '#FFFFFF', // colors.white
+    fontSize: 18,
     fontWeight: '800',
+    marginBottom: 4,
     letterSpacing: 0.3,
+  },
+  mapButtonSubtitle: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 20,
+  },
+  mapButtonArrow: {
+    color: '#FFFFFF', // colors.white
+    fontSize: 24,
+    fontWeight: '900',
   },
   // Participants styles
   participantsSection: {
@@ -1983,11 +2075,11 @@ const styles = StyleSheet.create({
   participantItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: '#FFFFFF', // colors.white
     borderRadius: 12,
     padding: 12,
     marginBottom: 8,
-    shadowColor: colors.shadowLight,
+    shadowColor: 'rgba(0, 0, 0, 0.1)', // colors.shadowLight
     shadowOpacity: 1,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
@@ -1997,13 +2089,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   participantInitial: {
-    color: colors.white,
+    color: '#FFFFFF', // colors.white
     fontSize: 16,
     fontWeight: '700',
   },
@@ -2013,12 +2105,12 @@ const styles = StyleSheet.create({
   participantName: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
     marginBottom: 2,
   },
   participantEmail: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
   },
   moreParticipants: {
     alignItems: 'center',
@@ -2026,7 +2118,7 @@ const styles = StyleSheet.create({
   },
   moreParticipantsText: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     fontWeight: '600',
   },
   emptyParticipants: {
@@ -2035,24 +2127,24 @@ const styles = StyleSheet.create({
   },
   emptyParticipantsText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     fontWeight: '600',
     marginBottom: 4,
   },
   emptyParticipantsSubtext: {
     fontSize: 14,
-    color: colors.textTertiary,
+    color: '#8A8A8A', // colors.textTertiary
   },
   // Participants modal styles
   addParticipantButton: {
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 12,
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 20,
   },
   addParticipantButtonText: {
-    color: colors.white,
+    color: '#FFFFFF', // colors.white
     fontSize: 16,
     fontWeight: '700',
   },
@@ -2062,11 +2154,11 @@ const styles = StyleSheet.create({
   participantModalItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.white,
+    backgroundColor: '#FFFFFF', // colors.white
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: colors.shadowLight,
+    shadowColor: 'rgba(0, 0, 0, 0.1)', // colors.shadowLight
     shadowOpacity: 1,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 2 },
@@ -2083,17 +2175,17 @@ const styles = StyleSheet.create({
   participantModalName: {
     fontSize: 16,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
     marginBottom: 4,
   },
   participantModalEmail: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     marginBottom: 2,
   },
   participantModalPhone: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
   },
   deleteParticipantButton: {
     width: 36,
@@ -2112,34 +2204,34 @@ const styles = StyleSheet.create({
   },
   emptyParticipantsModalText: {
     fontSize: 18,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     fontWeight: '600',
     marginBottom: 8,
   },
   emptyParticipantsModalSubtext: {
     fontSize: 14,
-    color: colors.textTertiary,
+    color: '#8A8A8A', // colors.textTertiary
   },
   // Styles pour l'utilisateur actuel
   currentUserItem: {
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
     borderWidth: 2,
-    borderColor: colors.keppel,
+    borderColor: '#2FB6A1', // colors.keppel
   },
   currentUserAvatar: {
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
   },
   currentUserName: {
-    color: colors.keppel,
+    color: '#2FB6A1', // colors.keppel
     fontWeight: '800',
   },
   currentUserModalItem: {
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
     borderWidth: 2,
-    borderColor: colors.keppel,
+    borderColor: '#2FB6A1', // colors.keppel
   },
   currentUserModalName: {
-    color: colors.keppel,
+    color: '#2FB6A1', // colors.keppel
     fontWeight: '800',
   },
 });

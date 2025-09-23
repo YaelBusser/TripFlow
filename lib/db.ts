@@ -42,6 +42,8 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			email TEXT NOT NULL UNIQUE,
 			password_hash TEXT NOT NULL,
 			salt TEXT NOT NULL,
+			name TEXT,
+			profile_photo_uri TEXT,
 			created_at INTEGER NOT NULL
 		);`
 	);
@@ -133,6 +135,19 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 		);`
 	);
 
+	// step checklist items (checklist per step)
+	await executeAsync(
+		db,
+		`CREATE TABLE IF NOT EXISTS step_checklist_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			step_id INTEGER NOT NULL,
+			text TEXT NOT NULL,
+			is_checked INTEGER NOT NULL DEFAULT 0,
+			created_at INTEGER NOT NULL,
+			FOREIGN KEY(step_id) REFERENCES steps(id) ON DELETE CASCADE
+		);`
+	);
+
 	// trip participants
 	await executeAsync(
 		db,
@@ -170,6 +185,27 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 	// Add created_at column to checklist_items if it doesn't exist
 	try {
 		await executeAsync(db, 'ALTER TABLE checklist_items ADD COLUMN created_at INTEGER NOT NULL DEFAULT 0;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Add name column to users if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE users ADD COLUMN name TEXT;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Add profile_photo_uri column to users if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE users ADD COLUMN profile_photo_uri TEXT;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Add cover_uri column to trips if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN cover_uri TEXT;');
 	} catch (e) {
 		// Column already exists, ignore
 	}

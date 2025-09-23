@@ -20,6 +20,14 @@ export type StepImage = {
   created_at: number;
 };
 
+export type StepChecklistItem = {
+  id: number;
+  step_id: number;
+  text: string;
+  is_checked: number;
+  created_at: number;
+};
+
 export async function listSteps(tripId: number): Promise<Step[]> {
 	const db = await getDatabase();
 	return await queryAsync<Step>(
@@ -148,6 +156,58 @@ export async function deleteStepImagesByUriForTrip(tripId: number, imageUri: str
        WHERE s.trip_id = ? AND si.image_uri = ?
      )`,
     [tripId, imageUri]
+  );
+}
+
+// Checklist des étapes
+export async function createStepChecklistItem(stepId: number, text: string): Promise<StepChecklistItem> {
+  const db = await getDatabase();
+  const createdAt = Date.now();
+  
+  await executeAsync(
+    db,
+    'INSERT INTO step_checklist_items (step_id, text, is_checked, created_at) VALUES (?, ?, ?, ?)',
+    [stepId, text, 0, createdAt]
+  );
+  
+  const rows = await queryAsync<StepChecklistItem>(
+    db,
+    'SELECT * FROM step_checklist_items WHERE step_id = ? AND created_at = ?',
+    [stepId, createdAt]
+  );
+  
+  return rows[0];
+}
+
+export async function listStepChecklistItems(stepId: number): Promise<StepChecklistItem[]> {
+  const db = await getDatabase();
+  return await queryAsync<StepChecklistItem>(
+    db,
+    'SELECT * FROM step_checklist_items WHERE step_id = ? ORDER BY created_at ASC',
+    [stepId]
+  );
+}
+
+export async function toggleStepChecklistItem(itemId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'UPDATE step_checklist_items SET is_checked = NOT is_checked WHERE id = ?',
+    [itemId]
+  );
+}
+
+export async function deleteStepChecklistItem(itemId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(db, 'DELETE FROM step_checklist_items WHERE id = ?', [itemId]);
+}
+
+export async function updateStepChecklistItem(itemId: number, text: string): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'UPDATE step_checklist_items SET text = ? WHERE id = ?',
+    [text, itemId]
   );
 }
 

@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import CustomSplashScreen from '../components/SplashScreen';
+import { ThemeProvider } from '../contexts/ThemeContext';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
@@ -30,18 +31,20 @@ export default function RootLayout() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-        <Stack.Screen name="auth/index" options={{ headerShown: false }} />
-        <Stack.Screen name="trip/[tripId]/details" options={{ headerShown: false }} />
-        <Stack.Screen name="trip/[tripId]/map" options={{ headerShown: false }} />
-        <Stack.Screen name="trip/[tripId]/journal" options={{ headerShown: false }} />
-        <Stack.Screen name="trip/[tripId]/checklist" options={{ headerShown: false }} />
-        </Stack>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <ThemeProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <Stack>
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="auth/index" options={{ headerShown: false }} />
+          <Stack.Screen name="trip/[tripId]/details" options={{ headerShown: false }} />
+          <Stack.Screen name="trip/[tripId]/map" options={{ headerShown: false }} />
+          <Stack.Screen name="trip/[tripId]/journal" options={{ headerShown: false }} />
+          <Stack.Screen name="trip/[tripId]/checklist" options={{ headerShown: false }} />
+          </Stack>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ThemeProvider>
   );
 }
