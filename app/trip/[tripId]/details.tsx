@@ -14,7 +14,7 @@ import { getCurrentUser } from '../../../lib/session';
 import { deleteStep, deleteStepImagesByUriForTrip, getTripStepImagesWithSteps, listSteps, Step, updateStep } from '../../../lib/steps';
 import { addTripImage, deleteTripImage, getTripImages, setTripCoverImage, TripImage, updateTripImageOrder } from '../../../lib/trip-images';
 import { addTripParticipant, deleteTripParticipant, getTripParticipants, TripParticipant } from '../../../lib/trip-participants';
-import { deleteTrip, getTrip, Trip, updateTrip } from '../../../lib/trips';
+import { deleteTrip, getTrip, toggleTripFavorite, Trip, updateTrip } from '../../../lib/trips';
 
 export default function TripDetailsHero() {
   const { themeColors } = useTheme();
@@ -48,6 +48,7 @@ export default function TripDetailsHero() {
   const [editCoverImage, setEditCoverImage] = useState<string | null>(null);
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
   const [startDateValue, setStartDateValue] = useState(new Date());
   const [endDateValue, setEndDateValue] = useState(new Date());
   
@@ -73,11 +74,11 @@ export default function TripDetailsHero() {
     if (steps && steps.length > 0) {
       const dest = steps[steps.length - 1];
       router.push({
-        pathname: `/trip/${id}/map`,
+        pathname: `/trip/${id}/map` as any,
         params: { focusLat: String(dest.latitude), focusLng: String(dest.longitude) }
       });
     } else {
-      router.push(`/trip/${id}/map`);
+      router.push(`/trip/${id}/map` as any);
     }
   };
 
@@ -119,6 +120,7 @@ export default function TripDetailsHero() {
       setEditStartDate(t.start_date ? new Date(t.start_date).toISOString().split('T')[0] : '');
       setEditEndDate(t.end_date ? new Date(t.end_date).toISOString().split('T')[0] : '');
       setEditCoverImage(t.cover_uri || null);
+      setIsFavorite(!!t.is_favorite);
     }
     
     // Charger les images du voyage (globales gérées dans ce modal) et préparer le carrousel
@@ -410,6 +412,23 @@ export default function TripDetailsHero() {
     );
   };
 
+  const onToggleFavorite = async () => {
+    try {
+      const newFavoriteState = await toggleTripFavorite(id);
+      setIsFavorite(newFavoriteState);
+      
+      // Mettre à jour l'état local du voyage
+      if (trip) {
+        setTrip({ ...trip, is_favorite: newFavoriteState ? 1 : 0 });
+      }
+      
+      console.log('Favori togglé dans details:', { id, newFavoriteState });
+    } catch (error) {
+      console.error('Erreur lors du toggle favori:', error);
+      Alert.alert('Erreur', 'Impossible de modifier les favoris');
+    }
+  };
+
   // Fonctions pour gérer les participants
   const onAddParticipant = async () => {
     if (!newParticipantName.trim()) {
@@ -550,28 +569,6 @@ export default function TripDetailsHero() {
       color: '#FFFFFF',
       fontSize: 16,
     },
-    likeFab: {
-      position: 'absolute',
-      bottom: 30,
-      right: 20,
-      zIndex: 10,
-      width: 56,
-      height: 56,
-      borderRadius: 28,
-      backgroundColor: themeColors.primary,
-      justifyContent: 'center',
-      alignItems: 'center',
-      shadowColor: themeColors.shadowDark,
-      shadowOpacity: 1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 8,
-    },
-    likeIcon: {
-      color: '#FFFFFF',
-      fontSize: 24,
-    },
-    // ... autres styles dynamiques
   });
 
   return (
@@ -585,9 +582,6 @@ export default function TripDetailsHero() {
       </Pressable>
       <Pressable style={dynamicStyles.editBtn} onPress={() => setShowEditModal(true)}>
         <Text style={dynamicStyles.editIcon}>✏️</Text>
-      </Pressable>
-      <Pressable style={dynamicStyles.likeFab}>
-        <Text style={dynamicStyles.likeIcon}>♡</Text>
       </Pressable>
 
       <ScrollView contentContainerStyle={{ paddingBottom: 40 }}>
@@ -707,7 +701,17 @@ export default function TripDetailsHero() {
             <Text style={styles.participantsCount}>{tripParticipants.length + 1}</Text>
           </View>
         </View>
-        <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>{trip?.title ?? 'Voyage'}</Text>
+          <Pressable 
+            style={styles.favoriteButton} 
+            onPress={onToggleFavorite}
+          >
+            <Text style={styles.favoriteIcon}>
+              {isFavorite ? '❤️' : '🤍'}
+            </Text>
+          </Pressable>
+        </View>
         <Text style={styles.desc}>
           {trip?.description || 'Aucune description disponible.'}
         </Text>
@@ -1359,28 +1363,6 @@ const styles = StyleSheet.create({
     fontSize: 24, 
     fontWeight: '900', 
     color: '#2FB6A1' 
-  },
-  likeFab: { 
-    position: 'absolute', 
-    right: 20, 
-    bottom: 50, 
-    width: 60, 
-    height: 60, 
-    borderRadius: 30, 
-    backgroundColor: '#ffffff', 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    shadowColor: '#000', 
-    shadowOpacity: 0.25, 
-    shadowRadius: 15, 
-    shadowOffset: { width: 0, height: 6 }, 
-    elevation: 6,
-    zIndex: 10,
-  },
-  likeIcon: { 
-    fontSize: 24, 
-    color: '#ef4444', 
-    fontWeight: '900' 
   },
   editBtn: { 
     position: 'absolute', 
@@ -2047,13 +2029,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     fontWeight: '600',
   },
-  // Missing styles
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
   participantsBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2426,5 +2401,20 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     borderRadius: 20,
+  },
+  // Styles pour les favoris
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  favoriteButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  favoriteIcon: {
+    fontSize: 20,
   },
 });

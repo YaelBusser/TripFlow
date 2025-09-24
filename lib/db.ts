@@ -59,6 +59,7 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			description TEXT,
 			adventure_started INTEGER DEFAULT 0,
 			completed INTEGER DEFAULT 0,
+			is_favorite INTEGER DEFAULT 0,
 			start_date INTEGER,
 			end_date INTEGER,
 			cover_uri TEXT,
@@ -97,6 +98,19 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			FOREIGN KEY(step_id) REFERENCES steps(id) ON DELETE CASCADE
 		);`
 	);
+
+	// Migration pour ajouter le champ is_favorite aux voyages existants
+	try {
+		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN is_favorite INTEGER DEFAULT 0');
+		console.log('Migration is_favorite: Colonne ajoutée avec succès');
+		
+		// Mettre à jour tous les voyages existants pour avoir is_favorite = 0
+		await executeAsync(db, 'UPDATE trips SET is_favorite = 0 WHERE is_favorite IS NULL');
+		console.log('Migration is_favorite: Voyages existants mis à jour');
+	} catch (error) {
+		// La colonne existe peut-être déjà, on ignore l'erreur
+		console.log('Migration is_favorite:', error);
+	}
 
 	// checklist items (per trip)
 	await executeAsync(

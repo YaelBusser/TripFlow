@@ -12,7 +12,7 @@ import { getCurrentUser } from '../../lib/session';
 import { createStep, listSteps } from '../../lib/steps';
 import { addTripImage, getTripImages } from '../../lib/trip-images';
 import { getTripParticipants } from '../../lib/trip-participants';
-import { createTrip, deleteTrip, listTrips, Trip, updateTripCover } from '../../lib/trips';
+import { createTrip, deleteTrip, listTrips, toggleTripFavorite, Trip, updateTripCover } from '../../lib/trips';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - 48) / 2; // 2 colonnes avec marges
@@ -48,6 +48,7 @@ export default function ExploreScreen() {
   const [showDestinationMap, setShowDestinationMap] = useState(false);
   const [selectedDestination, setSelectedDestination] = useState<{latitude: number, longitude: number, name: string} | null>(null);
   const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'completed'>('active');
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
   const loadTrips = useCallback(async () => {
     if (!userId) return;
@@ -73,7 +74,9 @@ export default function ExploreScreen() {
           completed: t.completed, 
           completed_type: typeof t.completed,
           completed_truthy: !!t.completed,
-          adventure_started: t.adventure_started 
+          adventure_started: t.adventure_started,
+          is_favorite: t.is_favorite,
+          is_favorite_type: typeof t.is_favorite
         }))
       });
       
@@ -280,6 +283,33 @@ export default function ExploreScreen() {
     }
   }
 
+  async function onToggleFavorite(tripId: number) {
+    try {
+      const isNowFavorite = await toggleTripFavorite(tripId);
+      
+      // Update local state
+      const updatedTrips = trips.map(trip => 
+        trip.id === tripId ? { ...trip, is_favorite: isNowFavorite ? 1 : 0 } : trip
+      );
+      setTrips(updatedTrips);
+      
+      // Update the filtered lists
+      const active = updatedTrips.filter(trip => !trip.completed && trip.adventure_started);
+      const upcoming = updatedTrips.filter(trip => !trip.completed && !trip.adventure_started);
+      const completed = updatedTrips.filter(trip => trip.completed === 1);
+      
+      setActiveTrips(active);
+      setUpcomingTrips(upcoming);
+      setCompletedTrips(completed);
+      
+      console.log('Favori togglé:', { tripId, isNowFavorite, updatedTrip: updatedTrips.find(t => t.id === tripId) });
+      
+    } catch (error) {
+      console.error('Erreur lors du toggle favori:', error);
+      Alert.alert('Erreur', 'Impossible de modifier les favoris');
+    }
+  }
+
   const renderTripCard = ({ item, index, isGridMode = false }: { item: Trip; index: number; isGridMode?: boolean }) => {
     const images = tripImages[item.id] || [];
     const participants = tripParticipants[item.id] || [];
@@ -313,6 +343,14 @@ export default function ExploreScreen() {
           <View style={styles.cardContent}>
             <View style={styles.cardHeader}>
               <Text style={isGridMode && index > 0 ? dynamicStyles.gridTripTitle : dynamicStyles.tripTitle}>{item.title}</Text>
+            </View>
+            
+            <View style={styles.cardBadges}>
+              {!!item.is_favorite && (
+                <View style={styles.favoriteIndicator}>
+                  <Text style={styles.favoriteIndicatorIcon}>❤️</Text>
+                </View>
+              )}
               <View style={styles.participantsBadge}>
                 <Text style={styles.participantsIcon}>👥</Text>
                 <Text style={styles.participantsCount}>x{participants.length + 1}</Text>
@@ -414,45 +452,111 @@ export default function ExploreScreen() {
   };
 
   const renderActiveContent = () => {
-    if (activeTrips.length > 0) {
-      return renderTripGrid(activeTrips);
-    } else {
-      return (
-        <View style={styles.emptySection}>
-          <Text style={styles.emptyIcon}>🚀</Text>
-          <Text style={styles.emptyTitle}>Aucun voyage en cours</Text>
-          <Text style={styles.emptyText}>Démarrez une aventure !</Text>
+    const filteredTrips = showFavoritesOnly 
+      ? activeTrips.filter(trip => trip.is_favorite) 
+      : activeTrips;
+      
+    return (
+      <View>
+        <View style={styles.contentHeader}>
+          <Text style={styles.contentTitle}>Voyages en cours</Text>
+          <Pressable 
+            style={[styles.favoritesFilterButton, showFavoritesOnly && styles.favoritesFilterButtonActive]}
+            onPress={() => setShowFavoritesOnly(!showFavoritesOnly)}
+          >
+            <Text style={[styles.favoritesFilterText, showFavoritesOnly && styles.favoritesFilterTextActive]}>
+              {showFavoritesOnly ? '❤️ Favoris' : '🤍 Tous'}
+            </Text>
+          </Pressable>
         </View>
-      );
-    }
+        
+        {filteredTrips.length > 0 ? (
+          renderTripGrid(filteredTrips)
+        ) : (
+          <View style={styles.emptySection}>
+            <Text style={styles.emptyIcon}>🚀</Text>
+            <Text style={styles.emptyTitle}>
+              {showFavoritesOnly ? 'Aucun favori en cours' : 'Aucun voyage en cours'}
+            </Text>
+            <Text style={styles.emptyText}>
+              {showFavoritesOnly ? 'Ajoutez des voyages en favoris' : 'Démarrez une aventure !'}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   const renderUpcomingContent = () => {
-    if (upcomingTrips.length > 0) {
-      return renderTripGrid(upcomingTrips);
-    } else {
-      return (
-        <View style={styles.emptySection}>
-          <Text style={styles.emptyIcon}>📅</Text>
-          <Text style={styles.emptyTitle}>Aucun voyage à venir</Text>
-          <Text style={styles.emptyText}>Planifiez votre prochaine aventure</Text>
+    const filteredTrips = showFavoritesOnly 
+      ? upcomingTrips.filter(trip => trip.is_favorite) 
+      : upcomingTrips;
+      
+    return (
+      <View>
+        <View style={styles.contentHeader}>
+          <Text style={styles.contentTitle}>Voyages à venir</Text>
+          <Pressable 
+            style={[styles.favoritesFilterButton, showFavoritesOnly && styles.favoritesFilterButtonActive]}
+            onPress={() => setShowFavoritesOnly(!showFavoritesOnly)}
+          >
+            <Text style={[styles.favoritesFilterText, showFavoritesOnly && styles.favoritesFilterTextActive]}>
+              {showFavoritesOnly ? '❤️ Favoris' : '🤍 Tous'}
+            </Text>
+          </Pressable>
         </View>
-      );
-    }
+        
+        {filteredTrips.length > 0 ? (
+          renderTripGrid(filteredTrips)
+        ) : (
+          <View style={styles.emptySection}>
+            <Text style={styles.emptyIcon}>📅</Text>
+            <Text style={styles.emptyTitle}>
+              {showFavoritesOnly ? 'Aucun favori à venir' : 'Aucun voyage à venir'}
+            </Text>
+            <Text style={styles.emptyText}>
+              {showFavoritesOnly ? 'Ajoutez des voyages en favoris' : 'Planifiez votre prochaine aventure'}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   const renderCompletedContent = () => {
-    if (completedTrips.length > 0) {
-      return renderTripGrid(completedTrips);
-    } else {
-      return (
-        <View style={styles.emptySection}>
-          <Text style={styles.emptyIcon}>🏁</Text>
-          <Text style={styles.emptyTitle}>Aucun voyage terminé</Text>
-          <Text style={styles.emptyText}>Terminez vos aventures pour les voir ici</Text>
+    const filteredTrips = showFavoritesOnly 
+      ? completedTrips.filter(trip => trip.is_favorite) 
+      : completedTrips;
+      
+    return (
+      <View>
+        <View style={styles.contentHeader}>
+          <Text style={styles.contentTitle}>Voyages terminés</Text>
+          <Pressable 
+            style={[styles.favoritesFilterButton, showFavoritesOnly && styles.favoritesFilterButtonActive]}
+            onPress={() => setShowFavoritesOnly(!showFavoritesOnly)}
+          >
+            <Text style={[styles.favoritesFilterText, showFavoritesOnly && styles.favoritesFilterTextActive]}>
+              {showFavoritesOnly ? '❤️ Favoris' : '🤍 Tous'}
+            </Text>
+          </Pressable>
         </View>
-      );
-    }
+        
+        {filteredTrips.length > 0 ? (
+          renderTripGrid(filteredTrips)
+        ) : (
+          <View style={styles.emptySection}>
+            <Text style={styles.emptyIcon}>🏁</Text>
+            <Text style={styles.emptyTitle}>
+              {showFavoritesOnly ? 'Aucun favori terminé' : 'Aucun voyage terminé'}
+            </Text>
+            <Text style={styles.emptyText}>
+              {showFavoritesOnly ? 'Ajoutez des voyages en favoris' : 'Terminez vos aventures pour les voir ici'}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
   };
 
   const dynamicStyles = StyleSheet.create({
@@ -1266,5 +1370,53 @@ const styles = StyleSheet.create({
   mapIcon: {
     fontSize: 20,
     marginLeft: 8,
+  },
+  contentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
+  contentTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1A1A1A',
+  },
+  favoritesFilterButton: {
+    backgroundColor: '#f3f4f6',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  favoritesFilterButtonActive: {
+    backgroundColor: '#2FB6A1',
+    borderColor: '#2FB6A1',
+  },
+  favoritesFilterText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  favoritesFilterTextActive: {
+    color: '#FFFFFF',
+  },
+  // Styles pour l'indicateur de favoris
+  cardBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  favoriteIndicator: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  favoriteIndicatorIcon: {
+    fontSize: 12,
   },
 });

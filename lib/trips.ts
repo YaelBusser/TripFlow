@@ -8,6 +8,7 @@ export type Trip = {
 	description?: string | null;
 	adventure_started?: number | null;
 	completed?: number | null;
+	is_favorite?: number | null;
 	start_date?: number | null;
 	end_date?: number | null;
 	cover_uri?: string | null;
@@ -15,8 +16,8 @@ export type Trip = {
 
 export async function listTrips(userId: number): Promise<Trip[]> {
 	const db = await getDatabase();
-	const trips = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, start_date, end_date, cover_uri FROM trips WHERE user_id = ? ORDER BY created_at DESC', [userId]);
-	console.log('listTrips récupérés:', trips.map(t => ({ id: t.id, title: t.title, completed: t.completed, adventure_started: t.adventure_started })));
+	const trips = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, is_favorite, start_date, end_date, cover_uri FROM trips WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+	console.log('listTrips récupérés:', trips.map(t => ({ id: t.id, title: t.title, completed: t.completed, adventure_started: t.adventure_started, is_favorite: t.is_favorite })));
 	return trips;
 }
 
@@ -34,7 +35,7 @@ export async function deleteTrip(id: number): Promise<void> {
 
 export async function getTrip(id: number): Promise<Trip | null> {
 	const db = await getDatabase();
-	const rows = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, start_date, end_date, cover_uri FROM trips WHERE id = ?', [id]);
+	const rows = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, is_favorite, start_date, end_date, cover_uri FROM trips WHERE id = ?', [id]);
 	return rows[0] ?? null;
 }
 
@@ -82,5 +83,34 @@ export async function setTripCompleted(id: number, completed: boolean): Promise<
 	}
 }
 
+export async function setTripFavorite(id: number, isFavorite: boolean): Promise<void> {
+	const db = await getDatabase();
+	await executeAsync(db, 'UPDATE trips SET is_favorite = ? WHERE id = ?', [isFavorite ? 1 : 0, id]);
+}
+
+export async function toggleTripFavorite(id: number): Promise<boolean> {
+	const db = await getDatabase();
+	
+	// Récupérer l'état actuel
+	const currentTrip = await queryAsync<{ is_favorite: number }>(db, 'SELECT is_favorite FROM trips WHERE id = ?', [id]);
+	if (currentTrip.length === 0) {
+		throw new Error('Voyage non trouvé');
+	}
+	
+	console.log('toggleTripFavorite - État actuel:', { id, currentFavorite: currentTrip[0].is_favorite });
+	
+	const newFavoriteState = currentTrip[0].is_favorite ? 0 : 1;
+	await executeAsync(db, 'UPDATE trips SET is_favorite = ? WHERE id = ?', [newFavoriteState, id]);
+	
+	console.log('toggleTripFavorite - Nouvel état:', { id, newFavoriteState });
+	
+	return newFavoriteState === 1;
+}
+
+export async function getFavoriteTrips(userId: number): Promise<Trip[]> {
+	const db = await getDatabase();
+	const trips = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, is_favorite, start_date, end_date, cover_uri FROM trips WHERE user_id = ? AND is_favorite = 1 ORDER BY created_at DESC', [userId]);
+	return trips;
+}
 
 

@@ -8,6 +8,7 @@ import { Alert, Dimensions, FlatList, Image, Modal, Platform, Pressable, ScrollV
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../../../contexts/ThemeContext';
+import { createJournalEntry, deleteJournalEntry, JournalEntry, listJournal, updateJournalEntry } from '../../../../lib/journal';
 import { addStepImage, createStepChecklistItem, deleteStep, deleteStepChecklistItem, deleteStepImage, getStep, getStepImages, listStepChecklistItems, listSteps, markStepAsArrived, markStepAsNotArrived, Step, StepChecklistItem, StepImage, toggleStepChecklistItem, updateStep, updateStepChecklistItem } from '../../../../lib/steps';
 import { addTripImage } from '../../../../lib/trip-images';
 import { getTrip, setTripCompleted as setTripCompletedDB } from '../../../../lib/trips';
@@ -46,6 +47,14 @@ export default function StepDetailsScreen() {
   const [showStartDatePicker, setShowStartDatePicker] = useState(false);
   const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const mapRef = useRef<MapView>(null);
+  
+  // États pour le journal de bord
+  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
+  const [showAddJournalModal, setShowAddJournalModal] = useState(false);
+  const [showEditJournalModal, setShowEditJournalModal] = useState(false);
+  const [editingJournalEntry, setEditingJournalEntry] = useState<JournalEntry | null>(null);
+  const [newJournalText, setNewJournalText] = useState('');
+  const [editJournalText, setEditJournalText] = useState('');
 
   useEffect(() => {
     loadStep();
@@ -72,8 +81,8 @@ export default function StepDetailsScreen() {
       setEndDate(stepData.end_date ? new Date(stepData.end_date) : null);
       const sortedSteps = stepsData.sort((a,b) => (a.order_index||0)-(b.order_index||0));
       setAllSteps(sortedSteps);
-      setAdventureStarted(!!tripData.adventure_started);
-      setTripCompletedState(!!tripData.completed);
+      setAdventureStarted(!!tripData?.adventure_started);
+      setTripCompletedState(!!tripData?.completed);
       
       // Vérifier si c'est la dernière étape
       const currentStepIndex = sortedSteps.findIndex(s => s.id === Number(stepId));
@@ -85,6 +94,10 @@ export default function StepDetailsScreen() {
       // Charger les éléments de checklist de l'étape
       const checklist = await listStepChecklistItems(Number(stepId));
       setChecklistItems(checklist);
+      
+      // Charger les entrées du journal de l'étape
+      const journal = await listJournal(Number(stepId));
+      setJournalEntries(journal);
     } catch (error) {
       console.log('Erreur lors du chargement de l\'étape:', error);
       Alert.alert('Erreur', 'Impossible de charger les détails de l\'étape');
@@ -385,6 +398,87 @@ export default function StepDetailsScreen() {
     setEditingChecklistText('');
   };
 
+  // Fonctions pour le journal de bord
+  const onAddJournalEntry = async () => {
+    if (!newJournalText.trim()) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
+    
+    try {
+      const newEntry = await createJournalEntry(Number(stepId), newJournalText.trim());
+      setJournalEntries(prev => [newEntry, ...prev]);
+      setNewJournalText('');
+      setShowAddJournalModal(false);
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible d\'ajouter l\'entrée au journal');
+    }
+  };
+
+  const onEditJournalEntry = (entry: JournalEntry) => {
+    setEditingJournalEntry(entry);
+    setEditJournalText(entry.content);
+    setShowEditJournalModal(true);
+  };
+
+  const onSaveEditJournalEntry = async () => {
+    if (!editingJournalEntry || !editJournalText.trim()) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
+    
+    try {
+      await updateJournalEntry(editingJournalEntry.id, editJournalText.trim());
+      setJournalEntries(prev => 
+        prev.map(entry => 
+          entry.id === editingJournalEntry.id 
+            ? { ...entry, content: editJournalText.trim() }
+            : entry
+        )
+      );
+      setShowEditJournalModal(false);
+      setEditingJournalEntry(null);
+      setEditJournalText('');
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible de modifier l\'entrée du journal');
+    }
+  };
+
+  const onDeleteJournalEntry = (entryId: number) => {
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
+    
+    Alert.alert(
+      'Supprimer l\'entrée',
+      'Êtes-vous sûr de vouloir supprimer cette entrée du journal ?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteJournalEntry(entryId);
+              setJournalEntries(prev => prev.filter(entry => entry.id !== entryId));
+            } catch (error) {
+              Alert.alert('Erreur', 'Impossible de supprimer l\'entrée du journal');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const onCancelEditJournalEntry = () => {
+    setEditingJournalEntry(null);
+    setEditJournalText('');
+    setShowEditJournalModal(false);
+  };
+
   // Fonctions pour redéfinir le point d'arrivée
   const handleMapPress = async (event: any) => {
     const { latitude, longitude } = event.nativeEvent.coordinate;
@@ -598,7 +692,7 @@ export default function StepDetailsScreen() {
             <Pressable
               style={styles.viewOnMapInlineBtn}
               onPress={() => router.push({
-                pathname: `/trip/${tripId}/map`,
+                pathname: `/trip/${tripId}/map` as any,
                 params: { focusLat: String(step.latitude), focusLng: String(step.longitude) }
               })}
             >
@@ -654,17 +748,6 @@ export default function StepDetailsScreen() {
             <Text style={styles.infoValue}>{locationName || '...'}</Text>
           </View>
 
-          <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Notes</Text>
-            <TextInput
-              style={styles.notesInput}
-              multiline
-              placeholder="Ajoutez des notes sur cette étape"
-              value={descDraft}
-              onChangeText={setDescDraft}
-              onBlur={saveDescription}
-            />
-          </View>
         </View>
 
         {/* Actions */}
@@ -755,6 +838,63 @@ export default function StepDetailsScreen() {
             <Pressable style={styles.deleteStepBtn} onPress={onDeleteStep}>
               <Text style={styles.deleteStepText}>🗑️ Supprimer cette étape</Text>
             </Pressable>
+          )}
+        </View>
+
+        {/* Section Journal de bord */}
+        <View style={styles.journalSection}>
+          <View style={styles.journalHeader}>
+            <Text style={styles.sectionTitle}>Journal de bord</Text>
+            <Pressable 
+              style={styles.addJournalButton} 
+              onPress={() => setShowAddJournalModal(true)}
+              disabled={tripCompleted}
+            >
+              <Text style={styles.addJournalButtonText}>+ Ajouter</Text>
+            </Pressable>
+          </View>
+          
+          {journalEntries.length === 0 ? (
+            <View style={styles.noJournalContainer}>
+              <Text style={styles.noJournalIcon}>📝</Text>
+              <Text style={styles.noJournalText}>Aucune entrée</Text>
+              <Text style={styles.noJournalSubtext}>Ajoutez votre première note dans le journal</Text>
+            </View>
+          ) : (
+            <View style={styles.journalList}>
+              {journalEntries.map((entry) => (
+                <View key={entry.id} style={styles.journalEntry}>
+                  <View style={styles.journalEntryHeader}>
+                    <Text style={styles.journalEntryDate}>
+                      {new Date(entry.created_at).toLocaleDateString('fr-FR', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        hour: '2-digit',
+                        minute: '2-digit'
+                      })}
+                    </Text>
+                    {!tripCompleted && (
+                      <View style={styles.journalEntryActions}>
+                        <Pressable 
+                          style={styles.journalEditButton} 
+                          onPress={() => onEditJournalEntry(entry)}
+                        >
+                          <Text style={styles.journalEditButtonText}>✏️</Text>
+                        </Pressable>
+                        <Pressable 
+                          style={styles.journalDeleteButton} 
+                          onPress={() => onDeleteJournalEntry(entry.id)}
+                        >
+                          <Text style={styles.journalDeleteButtonText}>🗑️</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.journalEntryContent}>{entry.content}</Text>
+                </View>
+              ))}
+            </View>
           )}
         </View>
 
@@ -1003,6 +1143,94 @@ export default function StepDetailsScreen() {
                 disabled={!selectedNewLocation}
               >
                 <Text style={styles.modalButtonTextPrimary}>Redéfinir</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Modal pour ajouter une entrée au journal */}
+      <Modal visible={showAddJournalModal} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Ajouter une note au journal</Text>
+            <Pressable onPress={() => setShowAddJournalModal(false)}>
+              <Text style={styles.modalClose}>✕</Text>
+            </Pressable>
+          </View>
+          
+          <View style={styles.modalContent}>
+            <Text style={styles.modalDescription}>
+              Partagez vos pensées et souvenirs de cette étape
+            </Text>
+            
+            <TextInput
+              style={styles.journalTextInput}
+              placeholder="Écrivez votre note ici..."
+              value={newJournalText}
+              onChangeText={setNewJournalText}
+              multiline
+              numberOfLines={8}
+              textAlignVertical="top"
+            />
+            
+            <View style={styles.modalActions}>
+              <Pressable 
+                style={styles.modalButtonSecondary} 
+                onPress={() => setShowAddJournalModal(false)}
+              >
+                <Text style={styles.modalButtonTextSecondary}>Annuler</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.modalButtonPrimary, !newJournalText.trim() && styles.modalButtonDisabled]} 
+                onPress={onAddJournalEntry}
+                disabled={!newJournalText.trim()}
+              >
+                <Text style={styles.modalButtonTextPrimary}>Ajouter</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Modal pour modifier une entrée du journal */}
+      <Modal visible={showEditJournalModal} animationType="slide" presentationStyle="pageSheet">
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Modifier la note</Text>
+            <Pressable onPress={onCancelEditJournalEntry}>
+              <Text style={styles.modalClose}>✕</Text>
+            </Pressable>
+          </View>
+          
+          <View style={styles.modalContent}>
+            <Text style={styles.modalDescription}>
+              Modifiez votre note du journal
+            </Text>
+            
+            <TextInput
+              style={styles.journalTextInput}
+              placeholder="Écrivez votre note ici..."
+              value={editJournalText}
+              onChangeText={setEditJournalText}
+              multiline
+              numberOfLines={8}
+              textAlignVertical="top"
+            />
+            
+            <View style={styles.modalActions}>
+              <Pressable 
+                style={styles.modalButtonSecondary} 
+                onPress={onCancelEditJournalEntry}
+              >
+                <Text style={styles.modalButtonTextSecondary}>Annuler</Text>
+              </Pressable>
+              <Pressable 
+                style={[styles.modalButtonPrimary, !editJournalText.trim() && styles.modalButtonDisabled]} 
+                onPress={onSaveEditJournalEntry}
+                disabled={!editJournalText.trim()}
+              >
+                <Text style={styles.modalButtonTextPrimary}>Sauvegarder</Text>
               </Pressable>
             </View>
           </View>
@@ -1712,5 +1940,112 @@ const styles = StyleSheet.create({
   searchResultAddress: {
     fontSize: 14,
     color: '#6b7280',
+  },
+  // Styles pour le journal de bord
+  journalSection: {
+    padding: 20,
+    marginTop: 24,
+  },
+  journalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  addJournalButton: {
+    backgroundColor: '#2FB6A1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  addJournalButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  noJournalContainer: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 32,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  noJournalIcon: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
+  noJournalText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#64748b',
+    marginBottom: 8,
+  },
+  noJournalSubtext: {
+    fontSize: 14,
+    color: '#94a3b8',
+  },
+  journalList: {
+    marginTop: 12,
+  },
+  journalEntry: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  journalEntryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  journalEntryDate: {
+    fontSize: 12,
+    color: '#6b7280',
+    fontWeight: '500',
+  },
+  journalEntryActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  journalEditButton: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#f1f5f9',
+  },
+  journalEditButtonText: {
+    fontSize: 14,
+  },
+  journalDeleteButton: {
+    padding: 6,
+    borderRadius: 6,
+    backgroundColor: '#fef2f2',
+  },
+  journalDeleteButtonText: {
+    fontSize: 14,
+  },
+  journalEntryContent: {
+    fontSize: 16,
+    color: '#1f2937',
+    lineHeight: 24,
+  },
+  journalTextInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    backgroundColor: 'white',
+    minHeight: 120,
+    textAlignVertical: 'top',
   },
 });

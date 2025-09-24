@@ -695,20 +695,6 @@ export default function TripMapScreen() {
 										strokeColor={isLastStepArrived ? "#dc2626" : "#f59e0b"} // Rouge si arrivé, orange sinon
 										strokeWidth={isLastStepArrived ? 8 : 4}
 									/>
-									{/* Zone remplie seulement si on est arrivé */}
-									{isLastStepArrived && (
-										<Polygon
-											coordinates={[
-												{ latitude: sortedSteps[sortedSteps.length - 2].latitude, longitude: sortedSteps[sortedSteps.length - 2].longitude },
-												{ latitude: sortedSteps[sortedSteps.length - 1].latitude, longitude: sortedSteps[sortedSteps.length - 1].longitude },
-												{ latitude: sortedSteps[sortedSteps.length - 1].latitude + 0.001, longitude: sortedSteps[sortedSteps.length - 1].longitude + 0.001 },
-												{ latitude: sortedSteps[sortedSteps.length - 2].latitude + 0.001, longitude: sortedSteps[sortedSteps.length - 2].longitude + 0.001 }
-											]}
-											fillColor="rgba(220, 38, 38, 0.3)" // Rouge semi-transparent
-											strokeColor="#dc2626"
-											strokeWidth={2}
-										/>
-									)}
 								</>
 							);
 						})()}
