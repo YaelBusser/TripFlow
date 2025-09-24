@@ -1,18 +1,21 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useNavigation } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Dimensions, FlatList, Image, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Dimensions, FlatList, Image, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../../../../lib/colors';
-import { addStepImage, createStepChecklistItem, deleteStep, deleteStepChecklistItem, deleteStepImage, getStep, getStepImages, listStepChecklistItems, listSteps, Step, StepChecklistItem, StepImage, toggleStepChecklistItem, updateStep, updateStepChecklistItem } from '../../../../lib/steps';
+import { useTheme } from '../../../../contexts/ThemeContext';
+import { addStepImage, createStepChecklistItem, deleteStep, deleteStepChecklistItem, deleteStepImage, getStep, getStepImages, listStepChecklistItems, listSteps, markStepAsArrived, markStepAsNotArrived, Step, StepChecklistItem, StepImage, toggleStepChecklistItem, updateStep, updateStepChecklistItem } from '../../../../lib/steps';
 import { addTripImage } from '../../../../lib/trip-images';
+import { getTrip, setTripCompleted as setTripCompletedDB } from '../../../../lib/trips';
 
 const { width } = Dimensions.get('window');
 
 export default function StepDetailsScreen() {
+  const { themeColors } = useTheme();
   const { tripId, stepId } = useLocalSearchParams<{ tripId: string; stepId: string }>();
   const router = useRouter();
   const navigation = useNavigation();
@@ -34,6 +37,14 @@ export default function StepDetailsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isArrived, setIsArrived] = useState(false);
+  const [adventureStarted, setAdventureStarted] = useState(false);
+  const [isLastStep, setIsLastStep] = useState(false);
+  const [tripCompleted, setTripCompletedState] = useState(false);
+  const [startDate, setStartDate] = useState<Date | null>(null);
+  const [endDate, setEndDate] = useState<Date | null>(null);
+  const [showStartDatePicker, setShowStartDatePicker] = useState(false);
+  const [showEndDatePicker, setShowEndDatePicker] = useState(false);
   const mapRef = useRef<MapView>(null);
 
   useEffect(() => {
@@ -48,14 +59,25 @@ export default function StepDetailsScreen() {
   const loadStep = async () => {
     try {
       setLoading(true);
-      const [stepData, stepsData] = await Promise.all([
+      const [stepData, stepsData, tripData] = await Promise.all([
         getStep(Number(stepId)),
-        listSteps(Number(tripId))
+        listSteps(Number(tripId)),
+        getTrip(Number(tripId))
       ]);
       setStep(stepData);
       setDescDraft(stepData.description || '');
       setNameDraft(stepData.name || '');
-      setAllSteps(stepsData.sort((a,b) => (a.order_index||0)-(b.order_index||0)));
+      setIsArrived(!!stepData.arrived_at);
+      setStartDate(stepData.start_date ? new Date(stepData.start_date) : null);
+      setEndDate(stepData.end_date ? new Date(stepData.end_date) : null);
+      const sortedSteps = stepsData.sort((a,b) => (a.order_index||0)-(b.order_index||0));
+      setAllSteps(sortedSteps);
+      setAdventureStarted(!!tripData.adventure_started);
+      setTripCompletedState(!!tripData.completed);
+      
+      // Vérifier si c'est la dernière étape
+      const currentStepIndex = sortedSteps.findIndex(s => s.id === Number(stepId));
+      setIsLastStep(currentStepIndex === sortedSteps.length - 1);
       // Charger les images de l'étape
       const pics = await getStepImages(Number(stepId));
       setStepImages(pics);
@@ -96,6 +118,10 @@ export default function StepDetailsScreen() {
 
   const saveName = async () => {
     if (!step) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     const trimmed = nameDraft.trim();
     if (trimmed && trimmed !== step.name) {
       await updateStep(step.id, { name: trimmed });
@@ -105,12 +131,131 @@ export default function StepDetailsScreen() {
 
   const saveDescription = async () => {
     if (!step) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     await updateStep(step.id, { description: descDraft });
     await loadStep();
   };
 
+  const handleStartDateChange = (event: any, selectedDate?: Date) => {
+    setShowStartDatePicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setStartDate(selectedDate);
+      if (step) {
+        updateStep(step.id, { start_date: selectedDate.getTime() });
+      }
+    }
+  };
+
+  const handleEndDateChange = (event: any, selectedDate?: Date) => {
+    setShowEndDatePicker(Platform.OS === 'ios');
+    if (selectedDate) {
+      setEndDate(selectedDate);
+      if (step) {
+        updateStep(step.id, { end_date: selectedDate.getTime() });
+      }
+    }
+  };
+
+  const handleFinishTrip = async () => {
+    try {
+      Alert.alert(
+        'Terminer le voyage',
+        'Êtes-vous sûr de vouloir terminer ce voyage ? Cette action est irréversible.',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Terminer',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                console.log('Terminaison du voyage', tripId);
+                await setTripCompletedDB(Number(tripId), true);
+                setTripCompletedState(true);
+                
+                // Recharger les données du voyage
+                await loadStep();
+                
+                console.log('Voyage terminé avec succès');
+                Alert.alert(
+                  'Félicitations ! 🎉',
+                  'Votre voyage est maintenant terminé ! Vous pouvez le retrouver dans la section "Voyages terminés".',
+                  [
+                    { text: 'OK', onPress: () => router.push('/(tabs)/explore') }
+                  ]
+                );
+              } catch (error) {
+                console.error('Erreur lors de la terminaison du voyage:', error);
+                Alert.alert('Erreur', 'Impossible de terminer le voyage');
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible de terminer le voyage');
+    }
+  };
+
+  const handleArrivalToggle = async () => {
+    try {
+      // Vérifier que l'aventure a commencé
+      if (!adventureStarted) {
+        Alert.alert('Aventure non démarrée', 'Vous devez d\'abord démarrer l\'aventure depuis la carte du voyage !');
+        return;
+      }
+      
+      if (isArrived) {
+        // Vérifier qu'on peut dé-marquer cette étape
+        const currentStepIndex = allSteps.findIndex(s => s.id === Number(stepId));
+        
+        // Ne pas pouvoir dé-marquer si on a marqué une étape plus loin
+        for (let i = currentStepIndex + 1; i < allSteps.length; i++) {
+          if (allSteps[i].arrived_at) {
+            Alert.alert('Impossible', 'Vous devez d\'abord dé-marquer les étapes suivantes !');
+            return;
+          }
+        }
+        
+        await markStepAsNotArrived(Number(stepId));
+        setIsArrived(false);
+        Alert.alert('Succès', 'Vous n\'êtes plus marqué comme arrivé à cette étape');
+      } else {
+        // Vérifier qu'on peut marquer cette étape comme atteinte
+        const currentStepIndex = allSteps.findIndex(s => s.id === Number(stepId));
+        
+        // Ne pas pouvoir marquer le point de départ comme atteint
+        if (currentStepIndex === 0) {
+          Alert.alert('Information', 'Vous êtes déjà au point de départ !');
+          return;
+        }
+        
+        // Vérifier que l'étape précédente est atteinte (sauf pour la première étape intermédiaire)
+        if (currentStepIndex > 1) {
+          const previousStep = allSteps[currentStepIndex - 1];
+          if (!previousStep.arrived_at) {
+            Alert.alert('Impossible', 'Vous devez d\'abord arriver à l\'étape précédente !');
+            return;
+          }
+        }
+        
+        await markStepAsArrived(Number(stepId));
+        setIsArrived(true);
+        Alert.alert('Félicitations !', 'Vous êtes arrivé à cette étape ! 🎉');
+      }
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible de mettre à jour le statut de l\'étape');
+    }
+  };
+
   const onAddImages = async () => {
     if (!step) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     try {
       setAddingImages(true);
       // Demander la permission si nécessaire
@@ -161,6 +306,10 @@ export default function StepDetailsScreen() {
   // Fonctions pour la checklist
   const onAddChecklistItem = async () => {
     if (!newChecklistText.trim()) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     
     try {
       const newItem = await createStepChecklistItem(Number(stepId), newChecklistText.trim());
@@ -172,6 +321,10 @@ export default function StepDetailsScreen() {
   };
 
   const onToggleChecklistItem = async (itemId: number) => {
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     try {
       await toggleStepChecklistItem(itemId);
       setChecklistItems(prev => 
@@ -187,6 +340,10 @@ export default function StepDetailsScreen() {
   };
 
   const onDeleteChecklistItem = async (itemId: number) => {
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     try {
       await deleteStepChecklistItem(itemId);
       setChecklistItems(prev => prev.filter(item => item.id !== itemId));
@@ -202,6 +359,10 @@ export default function StepDetailsScreen() {
 
   const onSaveEditChecklistItem = async () => {
     if (!editingChecklistId || !editingChecklistText.trim()) return;
+    if (tripCompleted) {
+      Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus le modifier.');
+      return;
+    }
     
     try {
       await updateStepChecklistItem(editingChecklistId, editingChecklistText.trim());
@@ -355,13 +516,19 @@ export default function StepDetailsScreen() {
       Alert.alert('Action non autorisée', isFirst ? "Le point de départ ne peut pas être supprimé." : "Le point d'arrivée ne peut pas être supprimé ici.");
       return;
     }
+    // Vérifier s'il y a des images liées à cette étape
+    const hasImages = stepImages.length > 0;
+    
     Alert.alert(
       "Supprimer l'étape",
-      `Voulez-vous supprimer l'étape "${step.name}" ?`,
+      hasImages 
+        ? `Voulez-vous supprimer l'étape "${step.name}" ?\n\n⚠️ ATTENTION : Toutes les photos de cette étape seront définitivement supprimées de la galerie du voyage.`
+        : `Voulez-vous supprimer l'étape "${step.name}" ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
-          text: 'Supprimer', style: 'destructive',
+          text: hasImages ? 'Supprimer (perdre les photos)' : 'Supprimer', 
+          style: 'destructive',
           onPress: async () => {
             try {
               await deleteStep(step.id);
@@ -448,9 +615,31 @@ export default function StepDetailsScreen() {
               onBlur={saveName}
             />
           </View>
+          {/* Champs de dates */}
           <View style={styles.infoItem}>
-            <Text style={styles.infoLabel}>Date</Text>
-            <Text style={styles.infoValue}>{formatDate(step.start_date)}</Text>
+            <Text style={styles.infoLabel}>Date de début</Text>
+            <Pressable 
+              style={styles.dateInput}
+              onPress={() => setShowStartDatePicker(true)}
+            >
+              <Text style={styles.dateText}>
+                {startDate ? startDate.toLocaleDateString('fr-FR') : 'Sélectionner une date'}
+              </Text>
+              <Text style={styles.dateIcon}>📅</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.infoItem}>
+            <Text style={styles.infoLabel}>Date de fin</Text>
+            <Pressable 
+              style={styles.dateInput}
+              onPress={() => setShowEndDatePicker(true)}
+            >
+              <Text style={styles.dateText}>
+                {endDate ? endDate.toLocaleDateString('fr-FR') : 'Sélectionner une date'}
+              </Text>
+              <Text style={styles.dateIcon}>📅</Text>
+            </Pressable>
           </View>
           
           <View style={styles.infoItem}>
@@ -480,6 +669,83 @@ export default function StepDetailsScreen() {
 
         {/* Actions */}
         <View style={styles.actionsSection}>
+          {/* Bouton d'arrivée */}
+          {(() => {
+            const currentStepIndex = allSteps.findIndex(s => s.id === Number(stepId));
+            const isFirstStep = currentStepIndex === 0;
+            const isDisabled = isFirstStep || (currentStepIndex > 1 && !allSteps[currentStepIndex - 1]?.arrived_at);
+            
+            // Vérifier si on peut dé-marquer cette étape
+            let canUnmark = true;
+            if (isArrived) {
+              for (let i = currentStepIndex + 1; i < allSteps.length; i++) {
+                if (allSteps[i].arrived_at) {
+                  canUnmark = false;
+                  break;
+                }
+              }
+            }
+            
+            // Ne pas afficher le bouton pour la première étape (départ)
+            if (isFirstStep) {
+              return (
+                <View style={styles.departureInfo}>
+                  <Text style={styles.departureText}>🏠 Point de départ</Text>
+                  <Text style={styles.departureSubtext}>Vous êtes déjà ici !</Text>
+                </View>
+              );
+            }
+            
+            return (
+              <Pressable 
+                style={[
+                  styles.arrivalBtn,
+                  isArrived && canUnmark && styles.arrivalBtnUnmark,
+                  isArrived && !canUnmark && styles.arrivalBtnArrived,
+                  (tripCompleted || !adventureStarted || (isDisabled && !isArrived) || (isArrived && !canUnmark)) && styles.arrivalBtnDisabled
+                ]}
+                onPress={handleArrivalToggle}
+                disabled={tripCompleted || !adventureStarted || (isDisabled && !isArrived) || (isArrived && !canUnmark)}
+              >
+                <Text style={[
+                  styles.arrivalBtnText, 
+                  isArrived && styles.arrivalBtnTextArrived,
+                  (tripCompleted || !adventureStarted || (isDisabled && !isArrived) || (isArrived && !canUnmark)) && styles.arrivalBtnTextDisabled
+                ]}>
+                  {tripCompleted ? '🏁 Voyage terminé' :
+                    !adventureStarted ? '🚀 Aventure non démarrée' :
+                    isArrived ? 
+                      (canUnmark ? 'Marquer comme non-arrivé' : '⏳ Étape suivante bloquée') :
+                      isDisabled ? '⏳ Étape précédente requise' : '📍 Je suis arrivé'}
+                </Text>
+              </Pressable>
+            );
+          })()}
+
+          {/* Bouton Terminer le voyage - affiché seulement si c'est la dernière étape, qu'on est arrivé, et que le voyage n'est pas encore terminé */}
+          {isLastStep && isArrived && !tripCompleted && (
+            <Pressable
+              style={styles.finishTripBtn}
+              onPress={handleFinishTrip}
+            >
+              <Text style={styles.finishTripBtnText}>
+                🏁 Terminer le voyage
+              </Text>
+            </Pressable>
+          )}
+
+          {/* Message si le voyage est terminé */}
+          {tripCompleted && (
+            <View style={styles.tripCompletedInfo}>
+              <Text style={styles.tripCompletedText}>
+                🎉 Voyage terminé !
+              </Text>
+              <Text style={styles.tripCompletedSubtext}>
+                Félicitations ! Ce voyage est maintenant dans vos souvenirs.
+              </Text>
+            </View>
+          )}
+
           {isLast && (
             <Pressable style={styles.redefineArrivalBtn} onPress={() => setShowRedefineArrival(true)}>
               <Text style={styles.redefineArrivalText}>📍 Redéfinir le point d'arrivée</Text>
@@ -573,7 +839,7 @@ export default function StepDetailsScreen() {
                     <View style={styles.checklistItemContent}>
                       <Text style={[
                         styles.checklistItemText,
-                        item.is_checked && styles.checklistItemTextChecked
+                        item.is_checked ? styles.checklistItemTextChecked : null
                       ]}>
                         {item.text}
                       </Text>
@@ -742,6 +1008,25 @@ export default function StepDetailsScreen() {
           </View>
         </SafeAreaView>
       </Modal>
+
+      {/* Date Pickers */}
+      {showStartDatePicker && (
+        <DateTimePicker
+          value={startDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleStartDateChange}
+        />
+      )}
+
+      {showEndDatePicker && (
+        <DateTimePicker
+          value={endDate || new Date()}
+          mode="date"
+          display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+          onChange={handleEndDateChange}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -749,7 +1034,7 @@ export default function StepDetailsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.backgroundPrimary,
+    backgroundColor: '#FFFFFF', // colors.backgroundPrimary
   },
   scrollView: {
     flex: 1,
@@ -761,7 +1046,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
   },
   errorContainer: {
     flex: 1,
@@ -771,50 +1056,51 @@ const styles = StyleSheet.create({
   },
   errorText: {
     fontSize: 18,
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
     marginBottom: 20,
   },
   header: {
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
+    borderBottomColor: '#E2E8F0', // colors.borderLight
   },
   backButton: {
     marginBottom: 10,
   },
   backButtonText: {
     fontSize: 16,
-    color: colors.keppel,
+    color: '#2FB6A1', // colors.keppel
     fontWeight: '600',
   },
   viewOnMapBtn: {
     alignSelf: 'flex-end',
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 8,
   },
   viewOnMapText: {
-    color: colors.white,
+    color: '#FFFFFF', // colors.white
     fontWeight: '700',
   },
   viewOnMapInlineBtn: {
     alignSelf: 'flex-start',
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
     marginBottom: 12,
   },
   viewOnMapInlineText: {
-    color: colors.white,
+    color: '#FFFFFF', // colors.white
     fontWeight: '700',
+    width: "100%",
   },
   stepName: {
     fontSize: 24,
     fontWeight: '800',
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
   },
   infoSection: {
     padding: 20,
@@ -825,16 +1111,16 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     marginBottom: 4,
   },
   infoValue: {
     fontSize: 16,
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
   },
   titleInput: {
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: '#E2E8F0', // colors.borderLight
     borderRadius: 10,
     padding: 12,
     fontSize: 16,
@@ -1042,7 +1328,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   arrowBtn: {
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -1056,18 +1342,20 @@ const styles = StyleSheet.create({
   reorderHint: {
     flex: 1,
     textAlign: 'center',
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
   },
   redefineArrivalBtn: {
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 12,
   },
   redefineArrivalText: {
     color: 'white',
     fontWeight: '700',
+    textAlign: 'center',
   },
   deleteStepBtn: {
     backgroundColor: '#fee2e2',
@@ -1081,34 +1369,158 @@ const styles = StyleSheet.create({
     color: '#991b1b',
     fontWeight: '700',
   },
+  
+  // Bouton d'arrivée
+  arrivalBtn: {
+    backgroundColor: '#2FB6A1', // colors.keppel
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#2FB6A1', // colors.keppel
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  arrivalBtnArrived: {
+    backgroundColor: '#2FB6A1', // colors.success
+    shadowColor: '#2FB6A1',
+  },
+  arrivalBtnUnmark: {
+    backgroundColor: '#F59E0B', // colors.warning
+    shadowColor: '#F59E0B',
+  },
+  arrivalBtnText: {
+    color: '#FFFFFF', // colors.white
+    fontWeight: '800',
+    fontSize: 18,
+  },
+  arrivalBtnTextArrived: {
+    color: '#FFFFFF',
+  },
+  arrivalBtnDisabled: {
+    backgroundColor: '#9ca3af', // Gris
+    shadowColor: '#9ca3af',
+  },
+  arrivalBtnTextDisabled: {
+    color: '#6b7280', // Gris foncé
+  },
+  
+  // Styles pour le bouton Terminer le voyage
+  finishTripBtn: {
+    backgroundColor: '#dc2626', // Rouge
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    shadowColor: '#dc2626',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  finishTripBtnText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    fontSize: 18,
+  },
+  
+  // Styles pour le message voyage terminé
+  tripCompletedInfo: {
+    backgroundColor: '#f0fdf4', // Vert très clair
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: '#22c55e', // Vert
+  },
+  tripCompletedText: {
+    color: '#15803d', // Vert foncé
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  tripCompletedSubtext: {
+    color: '#16a34a', // Vert moyen
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  
+  // Styles pour le point de départ
+  departureInfo: {
+    backgroundColor: '#f3f4f6', // Gris clair
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#d1d5db', // Gris
+  },
+  departureText: {
+    color: '#374151', // Gris foncé
+    fontWeight: '800',
+    fontSize: 18,
+    marginBottom: 4,
+  },
+  departureSubtext: {
+    color: '#6b7280', // Gris moyen
+    fontWeight: '500',
+    fontSize: 14,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: colors.textPrimary,
+    color: '#1A1A1A', // colors.textPrimary
     marginBottom: 16,
   },
   notesInput: {
     borderWidth: 1,
-    borderColor: colors.borderLight,
+    borderColor: '#E2E8F0', // colors.borderLight
     borderRadius: 10,
     padding: 12,
     minHeight: 80,
     textAlignVertical: 'top',
   },
+  dateInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0', // colors.borderLight
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
+  },
+  dateText: {
+    fontSize: 16,
+    color: '#1A1A1A', // colors.textPrimary
+    flex: 1,
+  },
+  dateIcon: {
+    fontSize: 16,
+    marginLeft: 8,
+  },
   noPhotosContainer: {
     alignItems: 'center',
     padding: 40,
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
     borderRadius: 12,
   },
   noPhotosText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
     marginBottom: 8,
   },
   noPhotosSubtext: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#4A4A4A', // colors.textSecondary
   },
   photosHeaderRow: {
     flexDirection: 'row',
@@ -1117,13 +1529,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   addImageCta: {
-    backgroundColor: colors.keppel,
+    backgroundColor: '#2FB6A1', // colors.keppel
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
   addImageCtaText: {
-    color: colors.white,
+    color: '#FFFFFF', // colors.white
     fontWeight: '700',
   },
   photosGrid: {
@@ -1137,7 +1549,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: 'hidden',
     position: 'relative',
-    backgroundColor: colors.eggshell,
+    backgroundColor: '#F8F1DD', // colors.eggshell
   },
   photoThumb: {
     width: '100%',

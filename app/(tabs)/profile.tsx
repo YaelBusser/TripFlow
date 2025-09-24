@@ -1,12 +1,13 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../contexts/ThemeContext';
 import { updateUserProfile } from '../../lib/auth';
 import { clearSession, getCurrentUser } from '../../lib/session';
+import { listSteps } from '../../lib/steps';
 import { listTrips } from '../../lib/trips';
 
 const { width } = Dimensions.get('window');
@@ -40,10 +41,22 @@ export default function ProfileScreen() {
 		loadUserData();
 	}, []);
 
+	// Recharger les données quand l'utilisateur revient sur cette page
+	useFocusEffect(
+		useCallback(() => {
+			loadUserData();
+		}, [])
+	);
+
 	async function loadUserData() {
 		try {
 			const user = await getCurrentUser();
 			if (user) {
+				console.log('Chargement des données utilisateur:', { 
+					email: user.email, 
+					name: user.name, 
+					profile_photo_uri: user.profile_photo_uri 
+				});
 				setEmail(user.email);
 				setName(user.name || '');
 				setProfilePhotoUri(user.profile_photo_uri || null);
@@ -59,18 +72,31 @@ export default function ProfileScreen() {
 	async function loadUserStats(userId: number) {
 		try {
 			const trips = await listTrips(userId);
-			const now = Date.now();
+			
+			// Calculer les voyages terminés (completed = 1)
+			const completedTrips = trips.filter(trip => trip.completed === 1);
+			
+			// Calculer les jours de voyage pour les voyages terminés uniquement
+			const daysTraveled = completedTrips.reduce((total, trip) => {
+				if (trip.start_date && trip.end_date) {
+					return total + Math.ceil((trip.end_date - trip.start_date) / (1000 * 60 * 60 * 24));
+				}
+				return total;
+			}, 0);
+			
+			// Calculer le nombre total d'étapes validées
+			let totalSteps = 0;
+			for (const trip of trips) {
+				const steps = await listSteps(trip.id);
+				const completedSteps = steps.filter(step => step.arrived_at !== null);
+				totalSteps += completedSteps.length;
+			}
 			
 			const stats: UserStats = {
 				totalTrips: trips.length,
-				completedTrips: trips.filter(trip => trip.end_date && trip.end_date < now).length,
-				totalSteps: 0, // À calculer si nécessaire
-				daysTraveled: trips.reduce((total, trip) => {
-					if (trip.start_date && trip.end_date) {
-						return total + Math.ceil((trip.end_date - trip.start_date) / (1000 * 60 * 60 * 24));
-					}
-					return total;
-				}, 0)
+				completedTrips: completedTrips.length,
+				totalSteps: totalSteps,
+				daysTraveled: daysTraveled
 			};
 			
 			setUserStats(stats);
@@ -112,10 +138,25 @@ export default function ProfileScreen() {
 			const user = await getCurrentUser();
 			if (!user) return;
 
+			console.log('Sauvegarde du profil:', {
+				editName,
+				name,
+				editEmail,
+				email,
+				editProfilePhoto,
+				currentProfilePhoto: user.profile_photo_uri
+			});
+
 			const updates: { name?: string; email?: string; profile_photo_uri?: string | null } = {};
 			if (editName !== name) updates.name = editName;
 			if (editEmail !== email) updates.email = editEmail;
-			if (editProfilePhoto !== profilePhotoUri) updates.profile_photo_uri = editProfilePhoto;
+			// Toujours inclure la photo de profil si elle a été modifiée dans le modal
+			if (editProfilePhoto !== (user.profile_photo_uri || null)) {
+				updates.profile_photo_uri = editProfilePhoto;
+				console.log('Photo de profil mise à jour:', editProfilePhoto);
+			}
+
+			console.log('Mises à jour à appliquer:', updates);
 
 			if (Object.keys(updates).length === 0) {
 				setShowEditModal(false);
@@ -123,10 +164,16 @@ export default function ProfileScreen() {
 			}
 
 			await updateUserProfile(user.id, updates);
+			console.log('Profil mis à jour en base de données');
+			
+			// Recharger les données utilisateur
 			await loadUserData();
+			console.log('Données utilisateur rechargées');
+			
 			setShowEditModal(false);
 			Alert.alert('Succès', 'Profil mis à jour avec succès');
 		} catch (error: any) {
+			console.error('Erreur lors de la sauvegarde:', error);
 			Alert.alert('Erreur', error.message || 'Erreur lors de la mise à jour du profil');
 		}
 	}
@@ -136,6 +183,7 @@ export default function ProfileScreen() {
 		setShowThemeModal(false);
 	}
 
+	// Fonctions pour la gestion de l'image dans le modal d'édition
 	async function pickImage() {
 		try {
 			const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -193,6 +241,8 @@ export default function ProfileScreen() {
 		);
 	}
 
+
+
 	function StatCard({ icon, title, value, color = themeColors.primary }: { icon: string, title: string, value: string | number, color?: string }) {
 		return (
 			<View style={[styles.statCard, { borderLeftColor: color, backgroundColor: themeColors.backgroundSecondary }]}>
@@ -244,16 +294,13 @@ export default function ProfileScreen() {
 				>
 					<View style={styles.headerOverlay}>
 						<View style={styles.profileSection}>
-						<Pressable style={styles.avatarContainer} onPress={showImagePicker}>
+						<View style={styles.avatarContainer}>
 							<Image 
 								source={profilePhotoUri ? { uri: profilePhotoUri } : require('../../assets/images/icon.png')} 
 								style={styles.avatar}
 							/>
 							<View style={styles.onlineIndicator} />
-							<View style={styles.editPhotoButton}>
-								<MaterialCommunityIcons name="camera" size={16} color={themeColors.backgroundPrimary} />
-							</View>
-						</Pressable>
+						</View>
 							<Text style={styles.userName}>{name || 'Mon Profil'}</Text>
 							<Text style={styles.userEmail}>{email}</Text>
 						</View>
@@ -304,7 +351,7 @@ export default function ProfileScreen() {
 						<MenuItem 
 							icon="bell" 
 							title="Notifications" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/notifications')}
 						/>
 						<MenuItem 
 							icon="palette" 
@@ -314,7 +361,7 @@ export default function ProfileScreen() {
 						<MenuItem 
 							icon="shield-account" 
 							title="Confidentialité" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/privacy')}
 						/>
 					</View>
 
@@ -324,17 +371,17 @@ export default function ProfileScreen() {
 						<MenuItem 
 							icon="help-circle" 
 							title="Aide" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/help')}
 						/>
 						<MenuItem 
 							icon="message-text" 
 							title="Nous contacter" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/contact')}
 						/>
 						<MenuItem 
 							icon="star" 
 							title="Évaluer l'app" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/rate-app')}
 						/>
 					</View>
 
@@ -344,17 +391,17 @@ export default function ProfileScreen() {
 						<MenuItem 
 							icon="information" 
 							title="À propos de TripFlow" 
-							onPress={() => Alert.alert('TripFlow', 'Version 1.0.0\n\nOrganisez vos voyages en toute simplicité.')}
+							onPress={() => router.push('/about')}
 						/>
 						<MenuItem 
 							icon="file-document" 
 							title="Conditions d'utilisation" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/terms')}
 						/>
 						<MenuItem 
 							icon="shield-check" 
 							title="Politique de confidentialité" 
-							onPress={() => Alert.alert('Info', 'Fonctionnalité à venir')}
+							onPress={() => router.push('/privacy')}
 						/>
 					</View>
 				</View>
@@ -434,9 +481,11 @@ export default function ProfileScreen() {
 								autoCapitalize="none"
 							/>
 						</View>
+
 					</View>
 				</SafeAreaView>
 			</Modal>
+
 
 			{/* Modal de sélection du thème */}
 			<Modal visible={showThemeModal} animationType="slide" presentationStyle="pageSheet">
@@ -728,19 +777,6 @@ const styles = StyleSheet.create({
 	},
 	
 	// Photo de profil
-	editPhotoButton: {
-		position: 'absolute',
-		bottom: 0,
-		right: 0,
-		width: 32,
-		height: 32,
-		borderRadius: 16,
-		backgroundColor: '#2FB6A1',
-		justifyContent: 'center',
-		alignItems: 'center',
-		borderWidth: 3,
-		borderColor: '#FFFFFF',
-	},
 	photoSection: {
 		alignItems: 'center',
 		marginBottom: 16,

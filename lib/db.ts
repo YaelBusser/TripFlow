@@ -58,6 +58,7 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			destination TEXT,
 			description TEXT,
 			adventure_started INTEGER DEFAULT 0,
+			completed INTEGER DEFAULT 0,
 			start_date INTEGER,
 			end_date INTEGER,
 			cover_uri TEXT,
@@ -79,6 +80,7 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 			end_date INTEGER,
 			description TEXT,
 			order_index INTEGER DEFAULT 0,
+			arrived_at INTEGER,
 			FOREIGN KEY(trip_id) REFERENCES trips(id) ON DELETE CASCADE
 		);`
 	);
@@ -203,9 +205,23 @@ async function runMigrations(db: DatabaseConnection): Promise<void> {
 		// Column already exists, ignore
 	}
 
+	// Add arrived_at column to steps if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE steps ADD COLUMN arrived_at INTEGER;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
 	// Add cover_uri column to trips if it doesn't exist
 	try {
 		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN cover_uri TEXT;');
+	} catch (e) {
+		// Column already exists, ignore
+	}
+
+	// Add completed column to trips if it doesn't exist
+	try {
+		await executeAsync(db, 'ALTER TABLE trips ADD COLUMN completed INTEGER DEFAULT 0;');
 	} catch (e) {
 		// Column already exists, ignore
 	}

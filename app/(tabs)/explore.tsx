@@ -21,6 +21,9 @@ export default function ExploreScreen() {
   const { themeColors } = useTheme();
   const [userId, setUserId] = useState<number | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [activeTrips, setActiveTrips] = useState<Trip[]>([]);
+  const [upcomingTrips, setUpcomingTrips] = useState<Trip[]>([]);
+  const [completedTrips, setCompletedTrips] = useState<Trip[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [tripSteps, setTripSteps] = useState<Record<number, any[]>>({});
@@ -44,6 +47,7 @@ export default function ExploreScreen() {
   const [endDateValue, setEndDateValue] = useState(new Date());
   const [showDestinationMap, setShowDestinationMap] = useState(false);
   const [selectedDestination, setSelectedDestination] = useState<{latitude: number, longitude: number, name: string} | null>(null);
+  const [activeTab, setActiveTab] = useState<'active' | 'upcoming' | 'completed'>('active');
 
   const loadTrips = useCallback(async () => {
     if (!userId) return;
@@ -51,6 +55,31 @@ export default function ExploreScreen() {
     try {
       const data = await listTrips(userId);
       setTrips(data);
+      
+      // Séparer les voyages par statut
+      const now = Date.now();
+      const active = data.filter(trip => !trip.completed && trip.adventure_started);
+      const upcoming = data.filter(trip => !trip.completed && !trip.adventure_started);
+      const completed = data.filter(trip => trip.completed === 1);
+      
+      console.log('Voyages chargés:', {
+        total: data.length,
+        actifs: active.length,
+        à_venir: upcoming.length,
+        terminés: completed.length,
+        détails: data.map(t => ({ 
+          id: t.id, 
+          title: t.title, 
+          completed: t.completed, 
+          completed_type: typeof t.completed,
+          completed_truthy: !!t.completed,
+          adventure_started: t.adventure_started 
+        }))
+      });
+      
+      setActiveTrips(active);
+      setUpcomingTrips(upcoming);
+      setCompletedTrips(completed);
       
       // Load steps, images and participants for each trip
       const stepsData: Record<number, any[]> = {};
@@ -91,6 +120,13 @@ export default function ExploreScreen() {
       }
     }, [userId, loadTrips])
   );
+
+  // Recharger les données au montage du composant
+  useEffect(() => {
+    if (userId) {
+      loadTrips();
+    }
+  }, [userId, loadTrips]);
 
   function formatDate(date: Date): string {
     return date.toISOString().split('T')[0]; // Format YYYY-MM-DD
@@ -225,8 +261,7 @@ export default function ExploreScreen() {
   async function onDelete(id: number) {
     if (!userId) return;
     await deleteTrip(id);
-    const data = await listTrips(userId);
-    setTrips(data);
+    await loadTrips(); // Utiliser loadTrips pour mettre à jour toutes les listes
   }
 
   async function onChangeCover(tripId: number, newCover: string) {
@@ -245,7 +280,7 @@ export default function ExploreScreen() {
     }
   }
 
-  const renderTripCard = ({ item, index }: { item: Trip; index: number }) => {
+  const renderTripCard = ({ item, index, isGridMode = false }: { item: Trip; index: number; isGridMode?: boolean }) => {
     const images = tripImages[item.id] || [];
     const participants = tripParticipants[item.id] || [];
     
@@ -265,21 +300,19 @@ export default function ExploreScreen() {
 
     return (
       <Pressable 
-        style={dynamicStyles.card} 
+        style={isGridMode && index > 0 ? dynamicStyles.gridCard : dynamicStyles.card} 
         onPress={() => router.push(`/trip/${item.id}/details`)}
       >
         <ImageBackground 
           source={getImageSource()} 
-          style={styles.cover} 
-          imageStyle={styles.coverImage}
+          style={isGridMode && index > 0 ? styles.gridCover : styles.cover} 
+          imageStyle={isGridMode && index > 0 ? styles.gridCoverImage : styles.coverImage}
         >
-          {/* Gradient overlay for better text readability */}
           <View style={styles.gradientOverlay} />
           
           <View style={styles.cardContent}>
-            {/* Trip title and participants count */}
             <View style={styles.cardHeader}>
-              <Text style={dynamicStyles.tripTitle}>{item.title}</Text>
+              <Text style={isGridMode && index > 0 ? dynamicStyles.gridTripTitle : dynamicStyles.tripTitle}>{item.title}</Text>
               <View style={styles.participantsBadge}>
                 <Text style={styles.participantsIcon}>👥</Text>
                 <Text style={styles.participantsCount}>x{participants.length + 1}</Text>
@@ -307,6 +340,119 @@ export default function ExploreScreen() {
         </ImageBackground>
       </Pressable>
     );
+  };
+
+  const renderTripGrid = (trips: Trip[]) => {
+    if (trips.length === 0) return null;
+    
+    if (trips.length === 1) {
+      // Un seul voyage : affichage normal
+      return (
+        <FlatList
+          data={trips}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={({ item, index }) => renderTripCard({ item, index, isGridMode: false })}
+          scrollEnabled={false}
+          contentContainerStyle={styles.listContainer}
+        />
+      );
+    }
+    
+    // Plusieurs voyages : premier en pleine largeur, puis grille 2x2
+    const firstTrip = trips[0];
+    const remainingTrips = trips.slice(1);
+    
+    return (
+      <View>
+        {/* Premier voyage en pleine largeur */}
+        <View style={styles.firstTripContainer}>
+          {renderTripCard({ item: firstTrip, index: 0, isGridMode: false })}
+        </View>
+        
+        {/* Voyages restants en grille */}
+        {remainingTrips.length > 0 && (
+          <View style={styles.gridContainer}>
+            {remainingTrips.map((trip, index) => (
+              <View key={trip.id} style={styles.gridItem}>
+                {renderTripCard({ item: trip, index: index + 1, isGridMode: true })}
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  const renderTabs = () => {
+    const tabs = [
+      { key: 'active', label: '🚀 En cours' },
+      { key: 'upcoming', label: '📅 À venir' },
+      { key: 'completed', label: '🏁 Terminés' },
+    ];
+
+    return (
+      <View style={styles.tabsContainer}>
+        {tabs.map((tab) => (
+          <Pressable
+            key={tab.key}
+            style={[
+              styles.tab,
+              activeTab === tab.key && styles.activeTab
+            ]}
+            onPress={() => setActiveTab(tab.key as any)}
+          >
+            <Text style={[
+              styles.tabText,
+              activeTab === tab.key && styles.activeTabText
+            ]}>
+              {tab.label}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    );
+  };
+
+  const renderActiveContent = () => {
+    if (activeTrips.length > 0) {
+      return renderTripGrid(activeTrips);
+    } else {
+      return (
+        <View style={styles.emptySection}>
+          <Text style={styles.emptyIcon}>🚀</Text>
+          <Text style={styles.emptyTitle}>Aucun voyage en cours</Text>
+          <Text style={styles.emptyText}>Démarrez une aventure !</Text>
+        </View>
+      );
+    }
+  };
+
+  const renderUpcomingContent = () => {
+    if (upcomingTrips.length > 0) {
+      return renderTripGrid(upcomingTrips);
+    } else {
+      return (
+        <View style={styles.emptySection}>
+          <Text style={styles.emptyIcon}>📅</Text>
+          <Text style={styles.emptyTitle}>Aucun voyage à venir</Text>
+          <Text style={styles.emptyText}>Planifiez votre prochaine aventure</Text>
+        </View>
+      );
+    }
+  };
+
+  const renderCompletedContent = () => {
+    if (completedTrips.length > 0) {
+      return renderTripGrid(completedTrips);
+    } else {
+      return (
+        <View style={styles.emptySection}>
+          <Text style={styles.emptyIcon}>🏁</Text>
+          <Text style={styles.emptyTitle}>Aucun voyage terminé</Text>
+          <Text style={styles.emptyText}>Terminez vos aventures pour les voir ici</Text>
+        </View>
+      );
+    }
   };
 
   const dynamicStyles = StyleSheet.create({
@@ -357,31 +503,48 @@ export default function ExploreScreen() {
       flex: 1,
       marginRight: 12,
     },
+    gridCard: {
+      backgroundColor: 'transparent', 
+      borderRadius: 20, 
+      overflow: 'hidden',
+      marginBottom: 12,
+      width: cardWidth,
+      shadowColor: themeColors.primary,
+      shadowOpacity: 0.2,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    gridTripTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+      flex: 1,
+      marginRight: 8,
+    },
     // ... autres styles dynamiques
   });
 
   return (
-    <SafeAreaView style={dynamicStyles.container}>
+    <SafeAreaView style={[dynamicStyles.container, { width: '100%' }]}>
       <View style={styles.headerRow}>
-        <Text style={dynamicStyles.header}>Vos voyages récents</Text>
+        <Text style={dynamicStyles.header}>Vos voyages</Text>
         <Pressable style={dynamicStyles.fab} onPress={() => setShowCreateModal(true)}>
           <Text style={dynamicStyles.fabText}>+</Text>
         </Pressable>
       </View>
 
-      <FlatList
-        data={trips}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={renderTripCard}
-        contentContainerStyle={styles.listContainer}
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyIcon}>🗺️</Text>
-            <Text style={styles.emptyTitle}>Aucun voyage</Text>
-            <Text style={styles.emptyText}>Créez votre premier voyage</Text>
-          </View>
-        }
-      />
+      {/* Onglets */}
+      {renderTabs()}
+
+      {/* Contenu selon l'onglet actif */}
+      <ScrollView style={[styles.scrollContainer, { width: '100%' }]} showsVerticalScrollIndicator={false}>
+        <View style={styles.tabContent}>
+          {activeTab === 'active' && renderActiveContent()}
+          {activeTab === 'upcoming' && renderUpcomingContent()}
+          {activeTab === 'completed' && renderCompletedContent()}
+        </View>
+      </ScrollView>
 
       {/* Create Trip Modal */}
       <Modal visible={showCreateModal} animationType="slide" presentationStyle="pageSheet">
@@ -575,15 +738,100 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   listContainer: {
-    paddingBottom: 100,
+    paddingBottom: 10,
+    width: '100%',
+  },
+  scrollContainer: {
+    flex: 1,
+  },
+  sectionContainer: {
+    marginBottom: 40,
+    width: '100%',
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1f2937',
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  emptySection: {
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: '#f8fafc',
+    borderRadius: 16,
+    marginBottom: 4,
+  },
+  lastSection: {
+    paddingBottom: 100, // Espace en bas pour éviter le cropping
   },
   cover: { 
     height: 180, 
     justifyContent: 'flex-end',
   },
+  gridCover: {
+    height: 220,
+    justifyContent: 'flex-end',
+  },
   coverImage: { 
     borderRadius: 20,
     resizeMode: 'cover' 
+  },
+  gridCoverImage: {
+    borderRadius: 16,
+    resizeMode: 'cover'
+  },
+  firstTripContainer: {
+    marginBottom: 16,
+  },
+  gridContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  gridItem: {
+    width: cardWidth,
+    marginBottom: 0,
+  },
+  // Styles pour les onglets
+  tabsContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    width: '100%',
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 8,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    backgroundColor: '#F8F9FA',
+  },
+  activeTab: {
+    backgroundColor: '#2FB6A1',
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
+    marginRight: 6,
+  },
+  activeTabText: {
+    color: '#FFFFFF',
+  },
+  tabContent: {
+    padding: 20,
+    paddingHorizontal: 0,
+    width: '100%',
+    marginBottom: 50,
   },
   gradientOverlay: {
     position: 'absolute',
@@ -591,7 +839,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.3)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 20,
   },
   cardContent: {

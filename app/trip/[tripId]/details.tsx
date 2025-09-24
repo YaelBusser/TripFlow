@@ -7,8 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Image, ImageBackground, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import LocationIcon from '../../../components/ui/location-icon';
-import { ChecklistItem, listChecklistItems, toggleChecklistItem } from '../../../lib/checklist';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { ChecklistItem, listChecklistItems, toggleChecklistItem } from '../../../lib/checklist';
 // import { JournalEntry, listJournal } from '../../../lib/journal';
 import { getCurrentUser } from '../../../lib/session';
 import { deleteStep, deleteStepImagesByUriForTrip, getTripStepImagesWithSteps, listSteps, Step, updateStep } from '../../../lib/steps';
@@ -712,6 +712,8 @@ export default function TripDetailsHero() {
           {trip?.description || 'Aucune description disponible.'}
         </Text>
         
+        {!!dateRange && <Text style={styles.dates}>{dateRange}</Text>}
+        
         {/* Bouton carte agrandi */}
         <Pressable style={styles.mapButtonLarge} onPress={goToMap}>
           <View style={styles.mapButtonContent}>
@@ -723,7 +725,87 @@ export default function TripDetailsHero() {
             <Text style={styles.mapButtonArrow}>→</Text>
           </View>
         </Pressable>
-        {!!dateRange && <Text style={styles.dates}>{dateRange}</Text>}
+
+        {/* Statut du voyage */}
+        <View style={styles.tripStatusSection}>
+          <Text style={styles.section}>Statut du voyage</Text>
+          <View style={styles.tripStatusContainer}>
+            <View style={[styles.tripStatusCard, { 
+              backgroundColor: trip?.completed === 1 ? '#10B981' : 
+                              trip?.adventure_started === 1 ? '#F59E0B' : '#6B7280',
+              borderColor: trip?.completed === 1 ? '#059669' : 
+                          trip?.adventure_started === 1 ? '#D97706' : '#4B5563'
+            }]}>
+              <Text style={styles.tripStatusIcon}>
+                {trip?.completed === 1 ? '✅' : 
+                 trip?.adventure_started === 1 ? '🔄' : '⏳'}
+              </Text>
+              <View style={styles.tripStatusTextContainer}>
+                <Text style={styles.tripStatusTitle}>
+                  {trip?.completed === 1 ? 'Voyage terminé' : 
+                   trip?.adventure_started === 1 ? 'Voyage en cours' : 'Voyage planifié'}
+                </Text>
+                <Text style={styles.tripStatusSubtitle}>
+                  {trip?.completed === 1 
+                    ? 'Toutes les étapes ont été complétées' 
+                    : trip?.adventure_started === 1 
+                    ? 'Voyage en cours de réalisation'
+                    : 'Voyage en préparation, pas encore démarré'
+                  }
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        {/* Résumé du suivi des étapes */}
+        {steps.length > 0 && (
+          <View style={styles.stepsSummarySection}>
+            <Text style={styles.section}>Suivi des étapes</Text>
+            {(() => {
+              // Exclure l'étape de départ (première étape) car elle n'est pas comptabilisée
+              const stepsWithoutDeparture = steps.slice(1);
+              const completedSteps = stepsWithoutDeparture.filter(step => step.arrived_at !== null);
+              const pendingSteps = stepsWithoutDeparture.filter(step => step.arrived_at === null);
+              const totalSteps = stepsWithoutDeparture.length;
+              const completionPercentage = totalSteps > 0 ? Math.round((completedSteps.length / totalSteps) * 100) : 0;
+              
+              return (
+                <>
+                  <View style={styles.stepsSummaryContainer}>
+                    <View style={styles.stepsSummaryCard}>
+                      <Text style={styles.stepsSummaryNumber}>{completedSteps.length}</Text>
+                      <Text style={styles.stepsSummaryLabel}>Terminées</Text>
+                    </View>
+                    <View style={styles.stepsSummaryCard}>
+                      <Text style={styles.stepsSummaryNumber}>{pendingSteps.length}</Text>
+                      <Text style={styles.stepsSummaryLabel}>En attente</Text>
+                    </View>
+                    <View style={styles.stepsSummaryCard}>
+                      <Text style={styles.stepsSummaryNumber}>{totalSteps}</Text>
+                      <Text style={styles.stepsSummaryLabel}>Total</Text>
+                    </View>
+                  </View>
+                  <View style={styles.stepsProgressBarContainer}>
+                    <View style={styles.stepsProgressBar}>
+                      <View 
+                        style={[
+                          styles.stepsProgressBarFill, 
+                          { 
+                            width: `${completionPercentage}%` 
+                          }
+                        ]} 
+                      />
+                    </View>
+                    <Text style={styles.stepsProgressText}>
+                      {completionPercentage}% complété
+                    </Text>
+                  </View>
+                </>
+              );
+            })()}
+          </View>
+        )}
       </View>
 
       {/* Steps Section removed: gestion des étapes depuis la carte */}
@@ -741,7 +823,14 @@ export default function TripDetailsHero() {
           {/* Afficher l'utilisateur actuel en premier */}
           <View style={[styles.participantItem, styles.currentUserItem]}>
             <View style={[styles.participantAvatar, styles.currentUserAvatar]}>
-              <Text style={styles.participantInitial}>M</Text>
+              {currentUser?.profile_photo_uri ? (
+                <Image 
+                  source={{ uri: currentUser.profile_photo_uri }} 
+                  style={styles.participantProfileImage}
+                />
+              ) : (
+                <Text style={styles.participantInitial}>M</Text>
+              )}
             </View>
             <View style={styles.participantInfo}>
               <Text style={[styles.participantName, styles.currentUserName]}>Moi</Text>
@@ -1031,7 +1120,14 @@ export default function TripDetailsHero() {
               <View style={[styles.participantModalItem, styles.currentUserModalItem]}>
                 <View style={styles.participantModalInfo}>
                   <View style={[styles.participantAvatar, styles.currentUserAvatar]}>
-                    <Text style={styles.participantInitial}>M</Text>
+                    {currentUser?.profile_photo_uri ? (
+                      <Image 
+                        source={{ uri: currentUser.profile_photo_uri }} 
+                        style={styles.participantProfileImage}
+                      />
+                    ) : (
+                      <Text style={styles.participantInitial}>M</Text>
+                    )}
                   </View>
                   <View style={styles.participantDetails}>
                     <Text style={[styles.participantModalName, styles.currentUserModalName]}>Moi</Text>
@@ -2063,6 +2159,98 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
   },
+  // Steps Summary styles
+  stepsSummarySection: {
+    paddingHorizontal: 0,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  stepsSummaryContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  stepsSummaryCard: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginHorizontal: 2,
+  },
+  stepsSummaryNumber: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#2FB6A1',
+    marginBottom: 4,
+  },
+  stepsSummaryLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    textAlign: 'center',
+    width: '100%',
+  },
+  stepsProgressBarContainer: {
+    marginTop: 8,
+  },
+  stepsProgressBar: {
+    height: 8,
+    backgroundColor: '#e2e8f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  stepsProgressBarFill: {
+    height: '100%',
+    backgroundColor: '#2FB6A1',
+    borderRadius: 4,
+  },
+  stepsProgressText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+    textAlign: 'center',
+  },
+  // Trip Status styles
+  tripStatusSection: {
+    paddingHorizontal: 0,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  tripStatusContainer: {
+    paddingHorizontal: 0,
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  tripStatusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    width: '100%',
+  },
+  tripStatusIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  tripStatusTextContainer: {
+    flex: 1,
+  },
+  tripStatusTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  tripStatusSubtitle: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FFFFFF',
+    opacity: 0.9,
+  },
   // Participants styles
   participantsSection: {
     paddingHorizontal: 20,
@@ -2233,5 +2421,10 @@ const styles = StyleSheet.create({
   currentUserModalName: {
     color: '#2FB6A1', // colors.keppel
     fontWeight: '800',
+  },
+  participantProfileImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 20,
   },
 });

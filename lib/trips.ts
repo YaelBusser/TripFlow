@@ -7,6 +7,7 @@ export type Trip = {
 	destination?: string | null;
 	description?: string | null;
 	adventure_started?: number | null;
+	completed?: number | null;
 	start_date?: number | null;
 	end_date?: number | null;
 	cover_uri?: string | null;
@@ -14,7 +15,9 @@ export type Trip = {
 
 export async function listTrips(userId: number): Promise<Trip[]> {
 	const db = await getDatabase();
-	return await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, start_date, end_date, cover_uri FROM trips WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+	const trips = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, start_date, end_date, cover_uri FROM trips WHERE user_id = ? ORDER BY created_at DESC', [userId]);
+	console.log('listTrips récupérés:', trips.map(t => ({ id: t.id, title: t.title, completed: t.completed, adventure_started: t.adventure_started })));
+	return trips;
 }
 
 export async function createTrip(userId: number, title: string, destination?: string | null, description?: string | null, startDate?: number | null, endDate?: number | null, coverUri?: string | null): Promise<number> {
@@ -31,7 +34,7 @@ export async function deleteTrip(id: number): Promise<void> {
 
 export async function getTrip(id: number): Promise<Trip | null> {
 	const db = await getDatabase();
-	const rows = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, start_date, end_date, cover_uri FROM trips WHERE id = ?', [id]);
+	const rows = await queryAsync<Trip>(db, 'SELECT id, user_id, title, destination, description, adventure_started, completed, start_date, end_date, cover_uri FROM trips WHERE id = ?', [id]);
 	return rows[0] ?? null;
 }
 
@@ -60,6 +63,23 @@ export async function updateTrip(
 export async function setTripAdventureStarted(id: number, started: boolean): Promise<void> {
 	const db = await getDatabase();
 	await executeAsync(db, 'UPDATE trips SET adventure_started = ? WHERE id = ?', [started ? 1 : 0, id]);
+}
+
+export async function setTripCompleted(id: number, completed: boolean): Promise<void> {
+	const db = await getDatabase();
+	console.log('setTripCompleted appelé:', { id, completed });
+	
+	try {
+		await executeAsync(db, 'UPDATE trips SET completed = ? WHERE id = ?', [completed ? 1 : 0, id]);
+		console.log('setTripCompleted réussi');
+		
+		// Vérifier que la mise à jour a bien eu lieu
+		const updatedTrip = await queryAsync<Trip>(db, 'SELECT id, completed FROM trips WHERE id = ?', [id]);
+		console.log('Voyage après mise à jour:', updatedTrip[0]);
+	} catch (error) {
+		console.error('Erreur setTripCompleted:', error);
+		throw error;
+	}
 }
 
 

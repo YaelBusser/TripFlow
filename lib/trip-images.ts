@@ -57,3 +57,24 @@ export async function setTripCoverImage(tripId: number, imageUri: string): Promi
     [imageUri, tripId]
   );
 }
+
+// Supprime toutes les images d'une étape de la galerie du voyage
+export async function deleteStepImagesFromTripGallery(tripId: number, stepId: number): Promise<void> {
+  const db = await getDatabase();
+  
+  // Récupérer toutes les URIs des images de l'étape
+  const stepImages = await queryAsync<{ image_uri: string }>(
+    db,
+    'SELECT image_uri FROM step_images WHERE step_id = ?',
+    [stepId]
+  );
+  
+  // Supprimer toutes les images du voyage qui correspondent aux URIs de l'étape
+  for (const stepImage of stepImages) {
+    await executeAsync(
+      db,
+      'DELETE FROM trip_images WHERE trip_id = ? AND image_uri = ?',
+      [tripId, stepImage.image_uri]
+    );
+  }
+}

@@ -10,6 +10,7 @@ import { getTrip, setTripAdventureStarted } from '../../../lib/trips';
 let MapView: any = null;
 let Marker: any = null;
 let Polyline: any = null;
+let Polygon: any = null;
 let DraggableFlatList: any = null;
 try {
 	// Lazy require to avoid crash if maps not installed yet
@@ -18,6 +19,7 @@ try {
 	MapView = maps.default;
 	Marker = maps.Marker;
 	Polyline = maps.Polyline;
+	Polygon = maps.Polygon;
 } catch (e) {
 	// no-op fallback
 }
@@ -45,6 +47,7 @@ export default function TripMapScreen() {
 	const [isSearching, setIsSearching] = useState(false);
 	const [finalDestination, setFinalDestination] = useState<{ latitude: number; longitude: number; name: string } | null>(null);
 	const [isReordering, setIsReordering] = useState(false);
+	const [tripCompleted, setTripCompleted] = useState(false);
 	const [isStepModalVisible, setIsStepModalVisible] = useState(false);
 	const [modalStep, setModalStep] = useState<Step | null>(null);
 	const [modalDescription, setModalDescription] = useState('');
@@ -135,6 +138,9 @@ export default function TripMapScreen() {
 				const trip = await getTrip(id);
 				if (trip && typeof trip.adventure_started !== 'undefined' && trip.adventure_started !== null) {
 					setAdventureStarted(!!trip.adventure_started);
+				}
+				if (trip && typeof trip.completed !== 'undefined' && trip.completed !== null) {
+					setTripCompleted(!!trip.completed);
 				}
 			} catch { }
 
@@ -248,6 +254,11 @@ export default function TripMapScreen() {
 		}, [loadSteps])
 	);
 
+	// Recharger les étapes quand on revient sur cette page
+	useEffect(() => {
+		loadSteps();
+	}, []);
+
 	const region = useMemo(() => {
 		// Si on est en mode ajout d'étape et qu'on a une position actuelle, zoomer dessus
 		if (showAddForm && currentLocation) {
@@ -265,12 +276,12 @@ export default function TripMapScreen() {
 				return {
 					latitude: currentLocation.latitude,
 					longitude: currentLocation.longitude,
-					latitudeDelta: 0.1,
-					longitudeDelta: 0.1
+					latitudeDelta: 0.5,
+					longitudeDelta: 0.5
 				};
 			}
 			// Si pas de position actuelle, centrer sur la France (centre géographique)
-			return { latitude: 46.2276, longitude: 2.2137, latitudeDelta: 2.0, longitudeDelta: 2.0 };
+			return { latitude: 46.2276, longitude: 2.2137, latitudeDelta: 3.0, longitudeDelta: 3.0 };
 		}
 
 		// Centrer sur le voyage complet (du point de départ aux étapes + destination finale)
@@ -317,9 +328,9 @@ export default function TripMapScreen() {
 		const latRange = maxLat - minLat;
 		const lngRange = maxLng - minLng;
 		
-		// Dézoom maximum tout en gardant les étapes visibles
-		const latitudeDelta = Math.max(0.5, latRange * 2.0 + 0.3);
-		const longitudeDelta = Math.max(0.5, lngRange * 2.0 + 0.3);
+		// Dézoom maximum pour avoir une vue d'ensemble de toute l'aventure
+		const latitudeDelta = Math.max(5.0, latRange * 8.0 + 2.0);
+		const longitudeDelta = Math.max(5.0, lngRange * 8.0 + 2.0);
 
 		return { latitude, longitude, latitudeDelta, longitudeDelta };
 	}, [sortedSteps, showAddForm, currentLocation, finalDestination, id]);
@@ -593,13 +604,14 @@ export default function TripMapScreen() {
 				{sortedSteps.map((s, idx) => {
 					const isFirstStep = idx === 0;
 					const isLastStep = idx === sortedSteps.length - 1;
+					const isArrived = !!s.arrived_at;
 
 					return (
 						<Marker
 							key={s.id}
 							coordinate={{ latitude: s.latitude, longitude: s.longitude }}
-							title={`${idx + 1}. ${s.name}`}
-							description={s.description ?? ''}
+							title={`${idx + 1}. ${s.name}${isArrived ? ' ✅' : ''}`}
+							description={isArrived ? 'Étape atteinte !' : (s.description ?? '')}
 							pinColor={isFirstStep ? "green" : isLastStep ? "orange" : "blue"}
 							onCalloutPress={() => router.push(`/trip/${id}/step/${s.id}`)}
 							onPress={() => router.push(`/trip/${id}/step/${s.id}`)}
@@ -623,37 +635,89 @@ export default function TripMapScreen() {
 						pinColor="orange"
 					/>
 				)}
-				{/* Lignes reliant les étapes */}
-				{sortedSteps.length > 0 && (
+				{/* Lignes de progression du voyage */}
+				{sortedSteps.length > 1 && (
 					<>
-						{/* Lignes reliant les étapes intermédiaires (sans l'arrivée) */}
-						{sortedSteps.length >= 2 && (
-							<Polyline
-								coordinates={(sortedSteps.length === 2 ? sortedSteps : sortedSteps.slice(0, -1)).map(s => ({
-									latitude: s.latitude, longitude: s.longitude
-								}))}
-								strokeColor="#3b82f6"
-								strokeWidth={4}
-							/>
-						)}
+						{/* Ligne complète du voyage (toujours affichée) */}
+						<Polyline
+							coordinates={sortedSteps.map(s => ({
+								latitude: s.latitude, longitude: s.longitude
+							}))}
+							strokeColor="#3b82f6" // Bleu original
+							strokeWidth={4}
+						/>
 
-						{/* Ligne de la dernière étape intermédiaire vers l'arrivée */}
-						{sortedSteps.length > 2 && (
-							<Polyline
-								coordinates={[
-									{ latitude: sortedSteps[sortedSteps.length - 2].latitude, longitude: sortedSteps[sortedSteps.length - 2].longitude },
-									{ latitude: sortedSteps[sortedSteps.length - 1].latitude, longitude: sortedSteps[sortedSteps.length - 1].longitude }
-								]}
-								strokeColor="#f59e0b"
-								strokeWidth={4}
-								strokePattern={[10, 5]} // Ligne pointillée orange
-							/>
-						)}
+						{/* Ligne plus claire pour les segments parcourus */}
+						{(() => {
+							// Trouver le dernier segment parcouru (en commençant par l'index 1 car on ne peut pas marquer le point de départ)
+							let lastArrivedIndex = -1;
+							for (let i = 1; i < sortedSteps.length; i++) {
+								if (sortedSteps[i].arrived_at) {
+									lastArrivedIndex = i;
+								} else {
+									break;
+								}
+							}
+							
+							console.log('Map - Steps avec arrived_at:', sortedSteps.map(s => ({ name: s.name, arrived_at: s.arrived_at })));
+							console.log('Map - lastArrivedIndex:', lastArrivedIndex);
+							
+							// Si on a parcouru au moins 1 étape (après le point de départ), dessiner la ligne plus claire
+							if (lastArrivedIndex >= 1) {
+								const passedSteps = sortedSteps.slice(0, lastArrivedIndex + 1);
+								console.log('Map - Dessin de la ligne rouge pour', passedSteps.length, 'étapes');
+								return (
+									<Polyline
+										coordinates={passedSteps.map(s => ({
+											latitude: s.latitude, longitude: s.longitude
+										}))}
+										strokeColor="#dc2626" // Rouge bien visible pour les segments parcourus
+										strokeWidth={6}
+									/>
+								);
+							}
+							return null;
+						})()}
+
+						{/* Trajet vers l'arrivée - couleur selon si on est arrivé */}
+						{sortedSteps.length > 2 && (() => {
+							// Vérifier si l'étape d'arrivée (dernière étape) est marquée comme "arrivé"
+							const isLastStepArrived = sortedSteps[sortedSteps.length - 1].arrived_at;
+							
+							return (
+								<>
+									{/* Ligne vers l'arrivée */}
+									<Polyline
+										coordinates={[
+											{ latitude: sortedSteps[sortedSteps.length - 2].latitude, longitude: sortedSteps[sortedSteps.length - 2].longitude },
+											{ latitude: sortedSteps[sortedSteps.length - 1].latitude, longitude: sortedSteps[sortedSteps.length - 1].longitude }
+										]}
+										strokeColor={isLastStepArrived ? "#dc2626" : "#f59e0b"} // Rouge si arrivé, orange sinon
+										strokeWidth={isLastStepArrived ? 8 : 4}
+									/>
+									{/* Zone remplie seulement si on est arrivé */}
+									{isLastStepArrived && (
+										<Polygon
+											coordinates={[
+												{ latitude: sortedSteps[sortedSteps.length - 2].latitude, longitude: sortedSteps[sortedSteps.length - 2].longitude },
+												{ latitude: sortedSteps[sortedSteps.length - 1].latitude, longitude: sortedSteps[sortedSteps.length - 1].longitude },
+												{ latitude: sortedSteps[sortedSteps.length - 1].latitude + 0.001, longitude: sortedSteps[sortedSteps.length - 1].longitude + 0.001 },
+												{ latitude: sortedSteps[sortedSteps.length - 2].latitude + 0.001, longitude: sortedSteps[sortedSteps.length - 2].longitude + 0.001 }
+											]}
+											fillColor="rgba(220, 38, 38, 0.3)" // Rouge semi-transparent
+											strokeColor="#dc2626"
+											strokeWidth={2}
+										/>
+									)}
+								</>
+							);
+						})()}
 					</>
 				)}
 
 				{/* Pas besoin de ligne séparée vers la destination finale car elle fait partie des étapes */}
 			</MapView>
+
 
 			{/* Header with back button */}
 			<View style={styles.header}>
@@ -773,6 +837,10 @@ export default function TripMapScreen() {
 							<View style={[styles.legendLine, { backgroundColor: '#f59e0b' }]} />
 							<Text style={styles.legendText}>Vers l'arrivée</Text>
 						</View>
+						<View style={styles.legendItem}>
+							<View style={[styles.legendLine, { backgroundColor: '#dc2626' }]} />
+							<Text style={styles.legendText}>Trajets parcourus</Text>
+						</View>
 					</View>
 				</View>
 			)}
@@ -797,12 +865,22 @@ export default function TripMapScreen() {
 					</Pressable>
 
 					{/* Bouton ajouter étape - bas centre */}
-					<Pressable style={styles.addStepButtonFixed} onPress={() => {
-						setShowAddForm(true);
-						// Masquer les étapes du voyage si on ouvre le formulaire d'ajout
-						setIsReordering(false);
-					}}>
-						<Text style={styles.addStepButtonText}>+ Ajouter une étape</Text>
+					<Pressable 
+						style={[styles.addStepButtonFixed, tripCompleted && styles.addStepButtonDisabled]} 
+						onPress={() => {
+							if (tripCompleted) {
+								Alert.alert('Voyage terminé', 'Ce voyage est terminé, vous ne pouvez plus ajouter d\'étapes.');
+								return;
+							}
+							setShowAddForm(true);
+							// Masquer les étapes du voyage si on ouvre le formulaire d'ajout
+							setIsReordering(false);
+						}}
+						disabled={tripCompleted}
+					>
+						<Text style={[styles.addStepButtonText, tripCompleted && styles.addStepButtonTextDisabled]}>
+							{tripCompleted ? '🏁 Voyage terminé' : '+ Ajouter une étape'}
+						</Text>
 					</Pressable>
 
 					{/* Bouton afficher étapes - bas droite */}
@@ -908,6 +986,20 @@ export default function TripMapScreen() {
 									setBlockedIndex(from);
 									setTimeout(() => setBlockedIndex(null), 250);
 									return;
+								}
+								
+								// Empêcher de déplacer une étape avant une étape déjà marquée comme "arrivé"
+								// Vérifier toutes les étapes entre la position de départ et la position d'arrivée
+								const startIndex = Math.min(from, to);
+								const endIndex = Math.max(from, to);
+								
+								for (let i = startIndex; i <= endIndex; i++) {
+									if (i !== from && data[i] && data[i].arrived_at) {
+										// Il y a une étape marquée comme "arrivé" dans la zone de déplacement
+										setBlockedIndex(from);
+										setTimeout(() => setBlockedIndex(null), 250);
+										return;
+									}
 								}
 								// Réindexer proprement selon le nouvel ordre
 								for (let i = 0; i < data.length; i++) {
@@ -1198,6 +1290,13 @@ const styles = StyleSheet.create({
 		color: 'white',
 		fontWeight: '800',
 		fontSize: 16,
+	},
+	addStepButtonDisabled: {
+		backgroundColor: '#9ca3af',
+		shadowColor: '#9ca3af',
+	},
+	addStepButtonTextDisabled: {
+		color: '#6b7280',
 	},
 	reorderIconButtonActive: {
 		backgroundColor: '#10b981',

@@ -1,4 +1,5 @@
 import { executeAsync, getDatabase, queryAsync } from './db';
+import { deleteStepImagesFromTripGallery } from './trip-images';
 
 export type Step = {
 	id: number;
@@ -10,6 +11,7 @@ export type Step = {
 	end_date?: number | null;
 	description?: string | null;
 	order_index?: number | null;
+	arrived_at?: number | null;
 };
 
 export type StepImage = {
@@ -32,7 +34,7 @@ export async function listSteps(tripId: number): Promise<Step[]> {
 	const db = await getDatabase();
 	return await queryAsync<Step>(
 		db,
-		`SELECT id, trip_id, name, latitude, longitude, start_date, end_date, description, order_index
+		`SELECT id, trip_id, name, latitude, longitude, start_date, end_date, description, order_index, arrived_at
 		 FROM steps WHERE trip_id = ? ORDER BY COALESCE(order_index, 0), start_date ASC, id ASC`,
 		[tripId]
 	);
@@ -84,6 +86,23 @@ export async function updateStep(stepId: number, updates: Partial<Omit<Step, 'id
 
 export async function deleteStep(stepId: number): Promise<void> {
 	const db = await getDatabase();
+	
+	// Récupérer le trip_id avant de supprimer l'étape
+	const stepRows = await queryAsync<{ trip_id: number }>(db, 'SELECT trip_id FROM steps WHERE id = ?', [stepId]);
+	const tripId = stepRows[0]?.trip_id;
+	
+	// Supprimer toutes les images de l'étape de la galerie du voyage
+	if (tripId) {
+		await deleteStepImagesFromTripGallery(tripId, stepId);
+	}
+	
+	// Supprimer toutes les images liées à cette étape
+	await executeAsync(db, 'DELETE FROM step_images WHERE step_id = ?', [stepId]);
+	
+	// Supprimer tous les éléments de checklist liés à cette étape
+	await executeAsync(db, 'DELETE FROM step_checklist_items WHERE step_id = ?', [stepId]);
+	
+	// Enfin, supprimer l'étape elle-même
 	await executeAsync(db, 'DELETE FROM steps WHERE id = ?', [stepId]);
 }
 
@@ -208,6 +227,27 @@ export async function updateStepChecklistItem(itemId: number, text: string): Pro
     db,
     'UPDATE step_checklist_items SET text = ? WHERE id = ?',
     [text, itemId]
+  );
+}
+
+// Marquer une étape comme atteinte
+export async function markStepAsArrived(stepId: number): Promise<void> {
+  const db = await getDatabase();
+  const arrivedAt = Date.now();
+  await executeAsync(
+    db,
+    'UPDATE steps SET arrived_at = ? WHERE id = ?',
+    [arrivedAt, stepId]
+  );
+}
+
+// Marquer une étape comme non atteinte
+export async function markStepAsNotArrived(stepId: number): Promise<void> {
+  const db = await getDatabase();
+  await executeAsync(
+    db,
+    'UPDATE steps SET arrived_at = NULL WHERE id = ?',
+    [stepId]
   );
 }
 
